@@ -158,7 +158,10 @@ void sigIntHandler(int)
 }
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
+    : QMainWindow(parent),
+      frameCount(0),
+      lastFpsUpdateTime(0),
+      lastFrameTime(0)
 {
     // 新增：设置窗口标志，无边框且置顶，这有助于防止点击穿透
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
@@ -187,13 +190,29 @@ MainWindow::MainWindow(QWidget *parent)
     QVBoxLayout *leftLayout = new QVBoxLayout();
 
     // 1.1 摄像头显示区域 (左上)
-    videoLabel = new QLabel("Camera Feed", this);
+    // 创建容器Widget来放置摄像头图像和FPS叠加
+    QWidget *videoContainer = new QWidget(this);
+    QVBoxLayout *videoContainerLayout = new QVBoxLayout(videoContainer);
+    videoContainerLayout->setContentsMargins(0, 0, 0, 0);
+
+    videoLabel = new QLabel("Camera Feed", videoContainer);
     // 修改：将 SizePolicy 设置为 Ignored。
     // 否则 setPixmap 会更新 label 的 sizeHint，导致布局不断尝试扩大 label 以适应图片，形成死循环。
-    videoLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored); 
+    videoLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     videoLabel->setAlignment(Qt::AlignCenter);
     videoLabel->setStyleSheet("border: 1px solid gray; background-color: #333;");
-    leftLayout->addWidget(videoLabel, 3); // 占据左侧 3/4 高度
+    videoContainerLayout->addWidget(videoLabel);
+
+    // 创建FPS显示标签，叠加在摄像头图像上方
+    fpsLabel = new QLabel("FPS: --", videoContainer);
+    fpsLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    fpsLabel->setStyleSheet("background-color: rgba(0, 0, 0, 150); color: #00FF00; font-size: 20px; font-weight: bold; padding: 5px; border-radius: 5px;");
+    fpsLabel->setAttribute(Qt::WA_TranslucentBackground, false);
+    // 设置为绝对定位，不受布局影响
+    fpsLabel->setGeometry(10, 10, 120, 40); // 固定位置和大小
+    fpsLabel->raise(); // 确保在最上层
+
+    leftLayout->addWidget(videoContainer, 3); // 占据左侧 3/4 高度
 
     // 1.2 照片列表区域 (左下)
     fileListWidget = new QListWidget(this);
@@ -292,17 +311,52 @@ void MainWindow::updateFrame()
     unsigned char *data = nullptr;
     size_t length = 0;
 
+    // 获取当前时间戳（毫秒）
+    qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
+
     if (camera->getFrame(&data, &length) != -1) {
+        // 更新帧计数
+        frameCount++;
+
+        // 计算帧间延时（处理延时）
+        if (lastFrameTime > 0) {
+            qint64 frameInterval = currentTime - lastFrameTime;
+
+            // 每秒更新一次FPS显示
+            if (lastFpsUpdateTime == 0) {
+                lastFpsUpdateTime = currentTime;
+            } else if (currentTime - lastFpsUpdateTime >= 1000) {
+                // 计算FPS
+                double fps = frameCount * 1000.0 / (currentTime - lastFpsUpdateTime);
+                frameCount = 0;
+                lastFpsUpdateTime = currentTime;
+
+                // 更新FPS显示
+                fpsLabel->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
+
+                // 根据帧率改变颜色
+                if (fps >= 25) {
+                    fpsLabel->setStyleSheet("background-color: rgba(0, 100, 0, 180); color: #00FF00; font-size: 20px; font-weight: bold; padding: 5px; border-radius: 5px;");
+                } else if (fps >= 15) {
+                    fpsLabel->setStyleSheet("background-color: rgba(100, 100, 0, 180); color: #FFFF00; font-size: 20px; font-weight: bold; padding: 5px; border-radius: 5px;");
+                } else {
+                    fpsLabel->setStyleSheet("background-color: rgba(100, 0, 0, 180); color: #FF0000; font-size: 20px; font-weight: bold; padding: 5px; border-radius: 5px;");
+                }
+            }
+        }
+
+        lastFrameTime = currentTime;
+
         // RGB565 对应 QImage::Format_RGB16
         // 使用原始数据构造 QImage，注意这里不进行拷贝，只是引用数据
         QImage rawImg(data, camera->getWidth(), camera->getHeight(), QImage::Format_RGB16);
-        
+
         if (!rawImg.isNull()) {
              // 必须调用 copy() 进行深拷贝，因为 data 指向的 V4L2 缓冲区即将被 releaseFrame 释放
              currentImage = rawImg.copy();
              videoLabel->setPixmap(QPixmap::fromImage(currentImage).scaled(videoLabel->size(), Qt::KeepAspectRatio));
         }
-        
+
         camera->releaseFrame();
     }
 }

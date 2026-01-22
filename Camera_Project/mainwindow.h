@@ -65,6 +65,7 @@ private slots:
 private:
     QWidget *centralWidget;
     QLabel *videoLabel;
+    QLabel *fpsLabel;               // 新增：FPS显示标签
     QPushButton *captureButton;
     QPushButton *exitButton; // 新增：退出按钮
     QListWidget *fileListWidget; // 新增：文件列表
@@ -75,6 +76,11 @@ private:
     QSocketNotifier *frameNotifier;  // 替代 QTimer *timer
     QImage currentImage;
     QSocketNotifier *sigIntNotifier; // 新增
+
+    // 帧率统计相关变量
+    int frameCount;
+    qint64 lastFpsUpdateTime;
+    qint64 lastFrameTime;
 };
 
 #endif // MAINWINDOW_H
