@@ -134,17 +134,6 @@ void ImageViewerDialog::mouseReleaseEvent(QMouseEvent *event)
 }
 
 // --- MainWindow 实现 ---
-#include "mainwindow.h"
-#include <QMessageBox>
-#include <QDateTime>
-#include <QDebug>
-#include <QDir>
-#include <QMouseEvent>
-#include <QApplication> // 必须包含：修复 incomplete type 'QApplication' 错误
-#include <QScreen>      // 必须包含：用于 primaryScreen()
-#include <sys/socket.h>
-#include <signal.h>
-#include <unistd.h>
 
 // 用于信号处理的 socket pair
 static int sigIntFd[2];
@@ -164,14 +153,25 @@ MainWindow::MainWindow(QWidget *parent)
       lastFrameTime(0),
       lastDisplayTime(0),
       latency_stats({0, 0, 0, 0, 0}),
-      scaledSize(0, 0)
+      scaledSize(0, 0),
+      pxpProcessor(nullptr)
 {
-    // 新增：设置窗口标志，无边框且置顶，这有助于防止点击穿透
+    // 尝试初始化PXP硬件加速（混合方案：PXP失败则回退到Qt渲染）
+    pxpProcessor = new PXPProcessor();
+    if (!pxpProcessor->init("/dev/fb0")) {
+        fprintf(stderr, "PXP initialization failed, falling back to Qt rendering\n");
+        delete pxpProcessor;
+        pxpProcessor = nullptr;
+    } else {
+        fprintf(stderr, "PXP hardware acceleration enabled\n");
+    }
+
+    // 设置窗口标志：无边框且置顶
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     
     // 1. 设置 UI
     centralWidget = new QWidget(this);
-    
+
     // 开启自动填充背景，并设置为黑色
     centralWidget->setAutoFillBackground(true);
     QPalette pal = centralWidget->palette();
@@ -180,12 +180,6 @@ MainWindow::MainWindow(QWidget *parent)
     
     // 关键：设置属性，告诉系统该窗口完全不透明
     setAttribute(Qt::WA_OpaquePaintEvent);
-    
-    // --- 修改开始 ---
-    // 移除或注释掉以下两行，允许 Qt 将触摸事件自动转换为鼠标事件，以便 QPushButton 正常工作
-    // setAttribute(Qt::WA_AcceptTouchEvents);
-    // this->setAttribute(Qt::WA_AcceptTouchEvents);
-    // --- 修改结束 ---
 
     setCentralWidget(centralWidget);
 
@@ -195,25 +189,40 @@ MainWindow::MainWindow(QWidget *parent)
     // 1.1 摄像头显示区域 (左上)
     // 创建容器Widget来放置摄像头图像和FPS叠加
     QWidget *videoContainer = new QWidget(this);
-    QVBoxLayout *videoContainerLayout = new QVBoxLayout(videoContainer);
-    videoContainerLayout->setContentsMargins(0, 0, 0, 0);
+    videoContainer->setGeometry(0, 0, 768, 450);
 
+    // videoLabel 使用绝对定位，占据整个 videoContainer
     videoLabel = new QLabel("Camera Feed", videoContainer);
-    // 修改：将 SizePolicy 设置为 Ignored。
-    // 否则 setPixmap 会更新 label 的 sizeHint，导致布局不断尝试扩大 label 以适应图片，形成死循环。
-    videoLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-    videoLabel->setAlignment(Qt::AlignCenter);
-    videoLabel->setStyleSheet("border: 1px solid gray; background-color: #333;");
-    videoContainerLayout->addWidget(videoLabel);
+    videoLabel->setGeometry(0, 0, 768, 450);
+    videoLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    
+    // === PXP 模式：让 videoLabel 透明，不遮挡 framebuffer ===
+    if (pxpProcessor) {
+        // 设置 videoLabel 完全透明，让 PXP 直接写入的 framebuffer 内容可见
+        videoLabel->setAttribute(Qt::WA_TranslucentBackground, true);
+        videoLabel->setAttribute(Qt::WA_NoSystemBackground, true);
+        videoLabel->setAutoFillBackground(false);
+        videoLabel->setStyleSheet("background: transparent; border: none;");
+        videoLabel->setText(""); // 清空文字
+        
+        // videoContainer 也需要透明
+        videoContainer->setAttribute(Qt::WA_TranslucentBackground, true);
+        videoContainer->setAttribute(Qt::WA_NoSystemBackground, true);
+        videoContainer->setAutoFillBackground(false);
+        videoContainer->setStyleSheet("background: transparent;");
+    } else {
+        // Qt 渲染模式：保持原有样式
+        videoLabel->setStyleSheet("border: none; background-color: #333;");
+        videoLabel->setAttribute(Qt::WA_OpaquePaintEvent, true);
+    }
 
     // 创建FPS显示标签，叠加在摄像头图像上方
     fpsLabel = new QLabel("FPS: --", videoContainer);
     fpsLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     fpsLabel->setStyleSheet("background-color: rgba(0, 0, 0, 180); color: #00FF00; font-size: 16px; font-weight: bold; padding: 5px; border-radius: 5px;");
     fpsLabel->setAttribute(Qt::WA_TranslucentBackground, false);
-    // 设置为绝对定位，不受布局影响
-    fpsLabel->setGeometry(10, 10, 140, 100); // 固定位置和大小（增大以显示多行延迟信息）
-    fpsLabel->raise(); // 确保在最上层
+    fpsLabel->setGeometry(10, 10, 140, 100);
+    fpsLabel->raise();
 
     leftLayout->addWidget(videoContainer, 3); // 占据左侧 3/4 高度
 
@@ -249,6 +258,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     // 2. 初始化摄像头
     camera = new V4L2Device();
+
+    // PXP相关配置已禁用，使用纯Qt渲染模式
     if (!camera->openDevice("/dev/video1")) {
         QMessageBox::critical(this, "Error", "Cannot open /dev/video1");
     } else {
@@ -303,6 +314,12 @@ MainWindow::~MainWindow()
         delete frameNotifier;
     }
     delete camera; // 正常退出时这里会被调用，关闭摄像头
+
+    // 清理PXP处理器
+    if (pxpProcessor) {
+        delete pxpProcessor;
+        pxpProcessor = nullptr;
+    }
 }
 
 // 窗口大小改变时更新缓存尺寸
@@ -405,9 +422,35 @@ void MainWindow::updateFrame()
         // T3: 图像处理结束时间
         qint64 T3 = QDateTime::currentMSecsSinceEpoch();
 
-        // 显示图像 - 优化版本
-        if (!currentRawImage.isNull()) {
-            // 使用缓存的缩放尺寸，快速变换算法
+        // 显示图像 - PXP硬件加速：直接写入framebuffer
+        if (pxpProcessor && pxpProcessor->isReady()) {
+            // PXP硬件加速：直接写入framebuffer，绕过Qt渲染管道
+            // 计算显示区域（左上角，占据3/4屏幕）
+            int screenWidth = pxpProcessor->getLCDWidth();
+            int screenHeight = pxpProcessor->getLCDHeight();
+            int videoWidth = screenWidth * 3 / 4;
+            int videoHeight = screenHeight * 3 / 4;
+
+            if (pxpProcessor->processFrame((const uint16_t *)data,
+                                                   camera->getWidth(),
+                                                   camera->getHeight(),
+                                                   0, 0,
+                                                   videoWidth, videoHeight)) {
+                // PXP处理成功，图像已直接写入framebuffer
+                // 不更新videoLabel，让PXP输出显示
+            } else {
+                // PXP处理失败，回退到Qt渲染
+                fprintf(stderr, "PXP: processFrame failed, fallback to Qt\n");
+                if (!currentRawImage.isNull()) {
+                    if (scaledSize.isValid()) {
+                        videoLabel->setPixmap(QPixmap::fromImage(currentRawImage).scaled(scaledSize, Qt::KeepAspectRatio, Qt::FastTransformation));
+                    } else {
+                        videoLabel->setPixmap(QPixmap::fromImage(currentRawImage).scaled(videoLabel->size(), Qt::KeepAspectRatio, Qt::FastTransformation));
+                    }
+                }
+            }
+        } else if (!currentRawImage.isNull()) {
+            // 纯Qt渲染模式
             if (scaledSize.isValid()) {
                 videoLabel->setPixmap(QPixmap::fromImage(currentRawImage).scaled(scaledSize, Qt::KeepAspectRatio, Qt::FastTransformation));
             } else {

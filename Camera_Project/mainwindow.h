@@ -17,6 +17,7 @@
 #include <QGridLayout> // 新增
 #include <QResizeEvent> // 新增：用于resize事件
 #include "v4l2_device.h"
+#include "pxp_processor.h"
 
 // 新增：自定义图片查看器对话框类，支持滑动切换
 class ImageViewerDialog : public QDialog {
@@ -79,6 +80,9 @@ private:
     QImage currentImage;             // 用于拍照的深拷贝图像
     QImage currentRawImage;          // 当前帧的浅拷贝引用，用于显示
     QSocketNotifier *sigIntNotifier; // 新增
+
+    // PXP硬件加速处理器（混合方案：PXP失败则回退到Qt）
+    PXPProcessor *pxpProcessor;
 
     // 预计算缩放优化
     QSize scaledSize;               // 缓存缩放后的尺寸
