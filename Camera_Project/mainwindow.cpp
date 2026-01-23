@@ -161,7 +161,9 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
       frameCount(0),
       lastFpsUpdateTime(0),
-      lastFrameTime(0)
+      lastFrameTime(0),
+      lastDisplayTime(0),
+      latency_stats({0, 0, 0, 0, 0})
 {
     // 新增：设置窗口标志，无边框且置顶，这有助于防止点击穿透
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
@@ -206,10 +208,10 @@ MainWindow::MainWindow(QWidget *parent)
     // 创建FPS显示标签，叠加在摄像头图像上方
     fpsLabel = new QLabel("FPS: --", videoContainer);
     fpsLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    fpsLabel->setStyleSheet("background-color: rgba(0, 0, 0, 150); color: #00FF00; font-size: 20px; font-weight: bold; padding: 5px; border-radius: 5px;");
+    fpsLabel->setStyleSheet("background-color: rgba(0, 0, 0, 180); color: #00FF00; font-size: 16px; font-weight: bold; padding: 5px; border-radius: 5px;");
     fpsLabel->setAttribute(Qt::WA_TranslucentBackground, false);
     // 设置为绝对定位，不受布局影响
-    fpsLabel->setGeometry(10, 10, 120, 40); // 固定位置和大小
+    fpsLabel->setGeometry(10, 10, 140, 100); // 固定位置和大小（增大以显示多行延迟信息）
     fpsLabel->raise(); // 确保在最上层
 
     leftLayout->addWidget(videoContainer, 3); // 占据左侧 3/4 高度
@@ -311,16 +313,21 @@ void MainWindow::updateFrame()
     unsigned char *data = nullptr;
     size_t length = 0;
 
-    // 获取当前时间戳（毫秒）
-    qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
+    // T1: 用户接收到帧通知的时间（毫秒）
+    qint64 T1 = QDateTime::currentMSecsSinceEpoch();
 
+    // 获取当前时间戳（毫秒）用于FPS计算
+    qint64 currentTime = T1;
+
+    // 获取帧数据（忽略驱动时间戳，使用相对时间）
     if (camera->getFrame(&data, &length) != -1) {
         // 更新帧计数
         frameCount++;
 
         // 计算帧间延时（处理延时）
         if (lastFrameTime > 0) {
-            qint64 frameInterval = currentTime - lastFrameTime;
+            // 帧间隔可用于后续调试，暂时不显示
+            // qint64 frameInterval = currentTime - lastFrameTime;
 
             // 每秒更新一次FPS显示
             if (lastFpsUpdateTime == 0) {
@@ -331,31 +338,76 @@ void MainWindow::updateFrame()
                 frameCount = 0;
                 lastFpsUpdateTime = currentTime;
 
+                // 计算平均延迟（如果至少有一帧）
+                QString latencyText = QString("FPS:%1").arg(fps, 0, 'f', 1);
+                if (latency_stats.stat_frame_count > 0) {
+                    double avg_io = (double)latency_stats.total_io / latency_stats.stat_frame_count;
+                    double avg_process = (double)latency_stats.total_process / latency_stats.stat_frame_count;
+                    double avg_display = (double)latency_stats.total_display / latency_stats.stat_frame_count;
+                    latencyText = QString("FPS:%1\nI/O:%2ms\n处理:%3ms\n显示:%4ms")
+                        .arg(fps, 0, 'f', 1)
+                        .arg(avg_io, 0, 'f', 1)
+                        .arg(avg_process, 0, 'f', 1)
+                        .arg(avg_display, 0, 'f', 1);
+                }
+
                 // 更新FPS显示
-                fpsLabel->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
+                fpsLabel->setText(latencyText);
 
                 // 根据帧率改变颜色
                 if (fps >= 25) {
-                    fpsLabel->setStyleSheet("background-color: rgba(0, 100, 0, 180); color: #00FF00; font-size: 20px; font-weight: bold; padding: 5px; border-radius: 5px;");
+                    fpsLabel->setStyleSheet("background-color: rgba(0, 100, 0, 180); color: #00FF00; font-size: 16px; font-weight: bold; padding: 5px; border-radius: 5px;");
                 } else if (fps >= 15) {
-                    fpsLabel->setStyleSheet("background-color: rgba(100, 100, 0, 180); color: #FFFF00; font-size: 20px; font-weight: bold; padding: 5px; border-radius: 5px;");
+                    fpsLabel->setStyleSheet("background-color: rgba(100, 100, 0, 180); color: #FFFF00; font-size: 16px; font-weight: bold; padding: 5px; border-radius: 5px;");
                 } else {
-                    fpsLabel->setStyleSheet("background-color: rgba(100, 0, 0, 180); color: #FF0000; font-size: 20px; font-weight: bold; padding: 5px; border-radius: 5px;");
+                    fpsLabel->setStyleSheet("background-color: rgba(100, 0, 0, 180); color: #FF0000; font-size: 16px; font-weight: bold; padding: 5px; border-radius: 5px;");
                 }
+
+                // 重置延迟统计
+                latency_stats.total_io = 0;
+                latency_stats.total_process = 0;
+                latency_stats.total_display = 0;
+                latency_stats.total_frames = 0;
+                latency_stats.stat_frame_count = 0;
             }
         }
 
         lastFrameTime = currentTime;
+
+        // T2: 图像处理开始时间
+        qint64 T2 = QDateTime::currentMSecsSinceEpoch();
 
         // RGB565 对应 QImage::Format_RGB16
         // 使用原始数据构造 QImage，注意这里不进行拷贝，只是引用数据
         QImage rawImg(data, camera->getWidth(), camera->getHeight(), QImage::Format_RGB16);
 
         if (!rawImg.isNull()) {
-             // 必须调用 copy() 进行深拷贝，因为 data 指向的 V4L2 缓冲区即将被 releaseFrame 释放
-             currentImage = rawImg.copy();
-             videoLabel->setPixmap(QPixmap::fromImage(currentImage).scaled(videoLabel->size(), Qt::KeepAspectRatio));
+            // 必须调用 copy() 进行深拷贝，因为 data 指向的 V4L2 缓冲区即将被 releaseFrame 释放
+            currentImage = rawImg.copy();
         }
+
+        // T3: 图像处理结束时间
+        qint64 T3 = QDateTime::currentMSecsSinceEpoch();
+
+        // 显示图像
+        if (!currentImage.isNull()) {
+            videoLabel->setPixmap(QPixmap::fromImage(currentImage).scaled(videoLabel->size(), Qt::KeepAspectRatio));
+        }
+
+        // T4: 显示完成时间
+        qint64 T4 = QDateTime::currentMSecsSinceEpoch();
+
+        // 内存累加统计（开销最小）
+        // 计算IO等待时间：从上一帧显示完成到收到新帧通知的时间
+        qint64 io_wait = (lastDisplayTime > 0) ? (T1 - lastDisplayTime) : 0;
+        latency_stats.total_io += io_wait;         // IO等待时间
+        latency_stats.total_process += (T3 - T2);  // 处理延迟：图像拷贝时间
+        latency_stats.total_display += (T4 - T3);  // 显示延迟：Qt 显示时间
+        latency_stats.stat_frame_count++;
+        latency_stats.total_frames++;  // 保留字段，可用于其他统计
+
+        // 更新上一帧显示完成时间，用于下一帧的IO等待计算
+        lastDisplayTime = T4;
 
         camera->releaseFrame();
     }

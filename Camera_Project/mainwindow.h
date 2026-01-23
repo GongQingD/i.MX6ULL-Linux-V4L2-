@@ -81,6 +81,16 @@ private:
     int frameCount;
     qint64 lastFpsUpdateTime;
     qint64 lastFrameTime;
+    qint64 lastDisplayTime;     // 上一帧显示完成时间
+
+    // 延迟统计结构
+    struct LatencyStats {
+        qint64 total_io;        // T1 - lastDisplayTime 累加 (毫秒)：IO等待时间
+        qint64 total_process;   // T3 - T2 累加 (毫秒)：图像处理时间
+        qint64 total_display;   // T4 - T3 累加 (毫秒)：Qt显示时间
+        qint64 total_frames;    // 总帧数（未使用）
+        int stat_frame_count;   // 当前统计窗口帧数
+    } latency_stats;
 };
 
 #endif // MAINWINDOW_H

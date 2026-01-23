@@ -5,7 +5,6 @@
 #include <sys/mman.h>
 #include <cstring>
 #include <iostream>
-#include <QDebug>
 
 V4L2Device::V4L2Device() : fd(-1), width(640), height(480), isCapturing(false) {
     memset(&currentBuffer, 0, sizeof(currentBuffer));
@@ -71,9 +70,9 @@ bool V4L2Device::initDevice(int w, int h) {
             // 非致命错误，有些驱动不支持
         } else {
             // 读取实际设置的帧率（驱动可能调整）
-            int actualFPS = parm.parm.capture.timeperframe.denominator / 
-                           parm.parm.capture.timeperframe.numerator;
-            qDebug() << "Camera FPS set to: " << actualFPS;
+            // int actualFPS = parm.parm.capture.timeperframe.denominator /
+            //                parm.parm.capture.timeperframe.numerator;
+            // 调试输出已移除
         }
     }
     // ===== 新增结束 =====
@@ -86,7 +85,7 @@ bool V4L2Device::initMmap() {
     /* 申请帧缓冲 */
     struct v4l2_requestbuffers req;
     memset(&req, 0, sizeof(req));
-    req.count = 4;
+    req.count = 3;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
 
