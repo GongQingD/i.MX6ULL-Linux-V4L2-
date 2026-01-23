@@ -38,6 +38,7 @@ private:
     std::vector<Buffer> buffers;
     struct v4l2_buffer currentBuffer; // 记录当前取出的 buffer 信息以便释放
     bool isCapturing;
+    int previousBufferIndex;          // 上一个缓冲区的索引，用于延迟释放
 
     bool initMmap();
 };

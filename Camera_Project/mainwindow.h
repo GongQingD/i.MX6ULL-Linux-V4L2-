@@ -12,9 +12,10 @@
 #include <QTouchEvent> // 新增
 #include <QSocketNotifier> 
 #include <QListWidget> 
-#include <QListWidgetItem> 
-#include <QDialog> 
+#include <QListWidgetItem>
+#include <QDialog>
 #include <QGridLayout> // 新增
+#include <QResizeEvent> // 新增：用于resize事件
 #include "v4l2_device.h"
 
 // 新增：自定义图片查看器对话框类，支持滑动切换
@@ -54,6 +55,7 @@ public:
     ~MainWindow();// 析构函数
 
 protected:
+    void resizeEvent(QResizeEvent *event) override;
 
 private slots:
     void updateFrame();
@@ -74,8 +76,12 @@ private:
 
     V4L2Device *camera;
     QSocketNotifier *frameNotifier;  // 替代 QTimer *timer
-    QImage currentImage;
+    QImage currentImage;             // 用于拍照的深拷贝图像
+    QImage currentRawImage;          // 当前帧的浅拷贝引用，用于显示
     QSocketNotifier *sigIntNotifier; // 新增
+
+    // 预计算缩放优化
+    QSize scaledSize;               // 缓存缩放后的尺寸
 
     // 帧率统计相关变量
     int frameCount;

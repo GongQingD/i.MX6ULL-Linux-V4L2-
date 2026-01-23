@@ -6,7 +6,7 @@
 #include <cstring>
 #include <iostream>
 
-V4L2Device::V4L2Device() : fd(-1), width(640), height(480), isCapturing(false) {
+V4L2Device::V4L2Device() : fd(-1), width(640), height(480), isCapturing(false), previousBufferIndex(-1) {
     memset(&currentBuffer, 0, sizeof(currentBuffer));
 }
 
@@ -85,7 +85,7 @@ bool V4L2Device::initMmap() {
     /* 申请帧缓冲 */
     struct v4l2_requestbuffers req;
     memset(&req, 0, sizeof(req));
-    req.count = 3;
+    req.count = 5; // 增加缓冲区数量，减少丢帧概率
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
 
@@ -139,6 +139,7 @@ bool V4L2Device::startCapturing() {
         return false;
     }
     isCapturing = true;
+    previousBufferIndex = -1; // 重置缓冲区索引
     return true;
 }
 
@@ -150,6 +151,7 @@ bool V4L2Device::stopCapturing() {
         return false;
     }
     isCapturing = false;
+    previousBufferIndex = -1; // 重置缓冲区索引
     return true;
 }
 
@@ -169,6 +171,19 @@ bool V4L2Device::closeDevice() {
 
 /* 获取一帧数据，将该帧数据的首地址和长度赋值给输入的指针变量 */
 int V4L2Device::getFrame(unsigned char **data, size_t *length) {
+    // 延迟释放优化：在获取新帧之前释放前一个缓冲区
+    if (previousBufferIndex != -1) {
+        struct v4l2_buffer buf;
+        memset(&buf, 0, sizeof(buf));
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index = previousBufferIndex;
+        if (ioctl(fd, VIDIOC_QBUF, &buf) == -1) {
+            perror("Queue Buffer (Delayed Release)");
+            // 继续执行，不返回错误
+        }
+    }
+
     memset(&currentBuffer, 0, sizeof(currentBuffer));
     currentBuffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     currentBuffer.memory = V4L2_MEMORY_MMAP;
@@ -179,14 +194,14 @@ int V4L2Device::getFrame(unsigned char **data, size_t *length) {
 
     *data = (unsigned char*)buffers[currentBuffer.index].start;
     *length = currentBuffer.bytesused;
+
+    // 更新前一个缓冲区索引，延迟释放到下一次getFrame
+    previousBufferIndex = currentBuffer.index;
     return currentBuffer.index;
 }
 
 /* 释放一帧数据，重新入队 */
 bool V4L2Device::releaseFrame() {
-    if (ioctl(fd, VIDIOC_QBUF, &currentBuffer) == -1) {
-        perror("Queue Buffer (Release)");
-        return false;
-    }
+    // 延迟释放优化：缓冲区已在getFrame中管理，此函数为空操作
     return true;
 }

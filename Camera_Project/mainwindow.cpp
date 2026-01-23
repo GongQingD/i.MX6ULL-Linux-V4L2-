@@ -163,7 +163,8 @@ MainWindow::MainWindow(QWidget *parent)
       lastFpsUpdateTime(0),
       lastFrameTime(0),
       lastDisplayTime(0),
-      latency_stats({0, 0, 0, 0, 0})
+      latency_stats({0, 0, 0, 0, 0}),
+      scaledSize(0, 0)
 {
     // 新增：设置窗口标志，无边框且置顶，这有助于防止点击穿透
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
@@ -286,6 +287,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     // 新增：强制全屏显示
     showFullScreen();
+
+    // 预计算初始缩放尺寸
+    if (camera && videoLabel) {
+        QSize labelSize = videoLabel->size();
+        QSize imageSize(camera->getWidth(), camera->getHeight());
+        scaledSize = imageSize.scaled(labelSize, Qt::KeepAspectRatio);
+    }
 }
 
 MainWindow::~MainWindow()
@@ -295,6 +303,19 @@ MainWindow::~MainWindow()
         delete frameNotifier;
     }
     delete camera; // 正常退出时这里会被调用，关闭摄像头
+}
+
+// 窗口大小改变时更新缓存尺寸
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    // 计算videoLabel的实际显示尺寸
+    QSize labelSize = videoLabel->size();
+    if (camera) {
+        // 计算保持宽高比的缩放尺寸
+        QSize imageSize(camera->getWidth(), camera->getHeight());
+        scaledSize = imageSize.scaled(labelSize, Qt::KeepAspectRatio);
+    }
 }
 
 // 新增：响应 Ctrl+C 信号
@@ -378,20 +399,20 @@ void MainWindow::updateFrame()
         qint64 T2 = QDateTime::currentMSecsSinceEpoch();
 
         // RGB565 对应 QImage::Format_RGB16
-        // 使用原始数据构造 QImage，注意这里不进行拷贝，只是引用数据
-        QImage rawImg(data, camera->getWidth(), camera->getHeight(), QImage::Format_RGB16);
-
-        if (!rawImg.isNull()) {
-            // 必须调用 copy() 进行深拷贝，因为 data 指向的 V4L2 缓冲区即将被 releaseFrame 释放
-            currentImage = rawImg.copy();
-        }
+        // 使用浅拷贝引用，不复制数据（显示时使用）
+        currentRawImage = QImage(data, camera->getWidth(), camera->getHeight(), QImage::Format_RGB16);
 
         // T3: 图像处理结束时间
         qint64 T3 = QDateTime::currentMSecsSinceEpoch();
 
-        // 显示图像
-        if (!currentImage.isNull()) {
-            videoLabel->setPixmap(QPixmap::fromImage(currentImage).scaled(videoLabel->size(), Qt::KeepAspectRatio));
+        // 显示图像 - 优化版本
+        if (!currentRawImage.isNull()) {
+            // 使用缓存的缩放尺寸，快速变换算法
+            if (scaledSize.isValid()) {
+                videoLabel->setPixmap(QPixmap::fromImage(currentRawImage).scaled(scaledSize, Qt::KeepAspectRatio, Qt::FastTransformation));
+            } else {
+                videoLabel->setPixmap(QPixmap::fromImage(currentRawImage).scaled(videoLabel->size(), Qt::KeepAspectRatio, Qt::FastTransformation));
+            }
         }
 
         // T4: 显示完成时间
@@ -415,6 +436,11 @@ void MainWindow::updateFrame()
 
 void MainWindow::captureImage()
 {
+    // 拍照时从浅拷贝创建深拷贝
+    if (!currentRawImage.isNull()) {
+        currentImage = currentRawImage.copy();
+    }
+
     if (!currentImage.isNull()) {
         QString savePath = "/media/figure/";
         QDir dir;

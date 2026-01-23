@@ -8,7 +8,6 @@
 // 信号处理函数
 void handleSignal(int sig) {
     if (sig == SIGINT) {
-        qDebug() << "Received Ctrl+C, quitting application...";
         // 退出 Qt 事件循环，这将导致 main 函数中的 a.exec() 返回
         QApplication::quit();
     }
@@ -16,6 +15,11 @@ void handleSignal(int sig) {
 
 int main(int argc, char *argv[])
 {
+    // Qt渲染优化：启用硬件加速和性能优化属性
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+    QCoreApplication::setAttribute(Qt::AA_UseOpenGLES); // 嵌入式系统使用OpenGL ES
+    QCoreApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, false); // 禁用软件OpenGL
+
     QApplication a(argc, argv);
 
     // 设置字体路径
