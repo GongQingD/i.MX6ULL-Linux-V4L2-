@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/home/ladykaka/Linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/include", 
+                "/home/ladykaka/Linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/include/linux/gpio", 
+                "/home/ladykaka/Linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/arch/arm/include", 
+                "/home/ladykaka/Linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/arch/arm/include/generated/"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/local/arm/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabihf/bin/arm-linux-gnueabihf-gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "clang-x64"
+        }
+    ],
+    "version": 4
+}

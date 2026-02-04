@@ -1,7 +1,7 @@
 build-Camera_Project-ATK_I_MX6U-Debug/
 build-My_Project-ATK_I_MX6U-Debug/
-tutorial/
-copy_project/
-linux-camera-touch-screen/
+driver_file/ap3216c_光照传感器/deploy.sh
+driver_file/led_drv/deploy.sh
 .claude/
+driver_file/ft5x06_lcd屏幕
 resume.tex

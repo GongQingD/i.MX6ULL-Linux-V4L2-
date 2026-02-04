@@ -1,0 +1,1 @@
+cmd_/home/ladykaka/Linux/Linux_Drivers/copy_project/dht11_温湿度传感器/dht11_drv.ko := arm-linux-gnueabihf-ld -EL -r  -T ./scripts/module-common.lds --build-id  -o /home/ladykaka/Linux/Linux_Drivers/copy_project/dht11_温湿度传感器/dht11_drv.ko /home/ladykaka/Linux/Linux_Drivers/copy_project/dht11_温湿度传感器/dht11_drv.o /home/ladykaka/Linux/Linux_Drivers/copy_project/dht11_温湿度传感器/dht11_drv.mod.o

@@ -267,4 +267,4 @@ v4l2-ctl --device=/dev/video1 --stream-mmap --stream-count=10
 
 ---
 
-*文档生成于 2024-12-23*
+*文档生成于 2025-12-23*

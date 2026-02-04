@@ -8,6 +8,7 @@
 |------|------|
 | [Camera_Project](Camera_Project/) | 基于 V4L2 的摄像头应用，支持实时预览、拍照保存和图片浏览 |
 | [My_Project](My_Project/) | 传感器控制面板，集成 LED 控制、AP3216C 光感/距离传感器、DHT11 温湿度传感器，并可启动摄像头应用 |
+| [driver_file](driver_file/) | Linux 驱动模块源码，包括 AP3216C、DHT11、SR501 等 |含所需的 Linux 驱动模块源码，用于支持各硬件设备 |
 
 ## 硬件环境
 
@@ -53,6 +54,12 @@
 │   ├── connect_board.sh    # 快速连接脚本
 │   ├── CLAUDE_CODE_GUIDELINES.md  # 开发指南
 │   └── BOARD_CONTEXT.md    # 开发板上下文档案
+├── driver_file/            # Linux 驱动模块源码
+│   ├── ap3216c_光照传感器/ # AP3216C 三合一传感器驱动
+│   ├── dht11_温湿度传感器/  # DHT11 温湿度传感器驱动
+│   ├── led_drv/            # LED 控制驱动
+│   ├── sr501_人体感应器/   # SR501 人体红外传感器驱动
+│   └── Makefile            # 驱动编译配置
 └── README.md               # 本文件
 ```
 
@@ -108,35 +115,20 @@
 
 ## 快速开始
 
+> **⚠️ 重要说明**: 文档中所有 `xxx` 占位符需要替换为您的实际配置：
+> - IP 地址：开发板实际 IP 地址
+> - 密码：开发板 SSH 登录密码
+
 ### 1. 开发环境搭建
 
-```bash
-# 安装交叉编译工具链 (Ubuntu)
-sudo apt-get install gcc-arm-linux-gnueabihf
-
-# 设置 Qt 交叉编译环境
-export PATH=/opt/fsl-imx-x11/4.1.15-2.1.0/sysroots/x86_64-pokysdk-linux/usr/bin:$PATH
-```
+需要交叉编译链arm-linux-gnueabihf，安装方法请参考网上教程。
 
 ### 2. 编译项目
+- QT项目的编译请在虚拟机的QT应用进行
+- 驱动编译过程参考正点原子IMX6ULL教程
 
-#### Camera_Project
-```bash
-cd Camera_Project
-/opt/fsl-imx-x11/4.1.15-2.1.0/sysroots/x86_64-pokysdk-linux/usr/bin/qmake
-make
-```
 
-#### My_Project
-```bash
-cd My_Project
-/opt/fsl-imx-x11/4.1.15-2.1.0/sysroots/x86_64-pokysdk-linux/usr/bin/qmake
-make
-```
-
-### 3. 自动部署
-
-每个项目都提供了部署脚本：
+### 3. QT程序部署
 
 ```bash
 # Camera_Project
@@ -148,143 +140,40 @@ cd My_Project
 ./deploy.sh
 ```
 
-### 4. 手动部署
+### 4. 驱动文件部署
 
+本项目包含以下 Linux 驱动模块，源码位于 `driver_file/` 目录：
+
+| 驱动名称 | 功能 | 设备节点 |
+|----------|------|----------|
+| ap3216c | 环境光/红外/接近传感器 | /dev/ap3216c |
+| dht11 | 温湿度传感器 | /dev/dht11 |
+| ft5x06 | LCD 触摸屏 | /dev/input/event1 |
+| led_drv | LED 控制 | /dev/led |
+| sr501 | 人体红外传感器 | /dev/sr501 |
+
+- ==如何将驱动文件下载到开发板，请参考正点原子IMX6ULL教程==
+
+将驱动文件在开发板部署，可以写一个脚本在开发板，一键部署所有驱动并启动QT界面
 ```bash
-# 上传到开发板
-sshpass -p "2918" scp -o HostKeyAlgorithms=+ssh-rsa Camera_Project/Camera_Project root@10.20.20.36:/lib/modules/4.1.15-g3dc0a4b/
-sshpass -p "2918" scp -o HostKeyAlgorithms=+ssh-rsa My_Project/My_Project root@10.20.20.36:/lib/modules/4.1.15-g3dc0a4b/
+#!/bin/sh
+set -e
+
+mod_list="led_drv ap3216c_drv dht11_drv sr501_drv"
+# The modules to be loaded.
+for name in $mod_list; do
+    ko="./${name}.ko"
+    if [ -f "$ko" ]; then
+        echo "[INFO] loading $ko"
+        insmod "$ko" || echo "[WARN] $ko already inserted?"
+    else
+        echo "[ERROR] missing $ko"
+    fi
+done
+
+./My_Project
 ```
 
-### 5. 运行应用
-
-```bash
-# 连接到开发板
-sshpass -p "2918" ssh -o HostKeyAlgorithms=+ssh-rsa root@10.20.20.36
-
-# 运行传感器控制面板
-/lib/modules/4.1.15-g3dc0a4b/My_Project
-
-# 运行摄像头应用 (或从 My_Project 界面启动)
-/lib/modules/4.1.15-g3dc0a4b/Camera_Project
-```
-
-## 连接信息
-
-| 参数 | 值 |
-|------|-----|
-| IP 地址 | 10.20.20.36 |
-| 用户名 | root |
-| SSH 密码 | 2918 |
-| 连接命令 | `sshpass -p "2918" ssh -o HostKeyAlgorithms=+ssh-rsa root@10.20.20.36` |
-
-**注意**: 由于开发板 SSH 版本较旧，必须携带 `-o HostKeyAlgorithms=+ssh-rsa` 参数。
-
-## 驱动准备
-
-在运行应用前，确保以下驱动已加载：
-
-```bash
-# 检查摄像头驱动
-lsmod | grep -E "ov5640|mx6s_capture"
-
-# 检查传感器驱动
-lsmod | grep -E "ap3216c|dht11"
-
-# 检查 LED 驱动
-lsmod | grep led
-```
-
-如果驱动未加载，请先安装对应的内核模块：
-
-```bash
-# 上传驱动模块到开发板
-sshpass -p "2918" scp -o HostKeyAlgorithms=+ssh-rsa *.ko root@10.20.20.36:/lib/modules/4.1.15-g3dc0a4b/
-
-# 加载驱动
-insmod /lib/modules/4.1.15-g3dc0a4b/ap3216c.ko
-insmod /lib/modules/4.1.15-g3dc0a4b/led_drv.ko
-insmod /lib/modules/4.1.15-g3dc0a4b/dht11.ko
-```
-
-## 故障排查
-
-### 常见问题
-
-1. **摄像头黑屏**
-   ```bash
-   # 检查设备权限
-   ls -la /dev/video1
-
-   # 检查像素格式支持
-   v4l2-ctl --device=/dev/video1 --list-formats
-
-   # 查看内核日志
-   dmesg | grep -i camera
-   ```
-
-2. **传感器读数失败**
-   ```bash
-   # 检查设备文件是否存在
-   ls -la /dev/ap3216c /dev/dht11 /dev/led
-
-   # 检查驱动是否加载
-   lsmod | grep -E "ap3216c|dht11|led"
-
-   # 测试设备访问
-   cat /dev/ap3216c
-   ```
-
-3. **Qt 应用启动失败**
-   ```bash
-   # 检查 Qt 库路径
-   echo $QT_QPA_PLATFORM
-
-   # 设置显示环境
-   export QT_QPA_PLATFORM=linuxfb:fb=/dev/fb0
-   export QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS=/dev/input/event1
-   ```
-
-### 调试命令
-
-```bash
-# 查看系统信息
-uname -a
-cat /proc/cpuinfo
-
-# 检查内存和存储
-free -h
-df -h
-
-# 监控系统日志
-dmesg -w
-
-# 测试网络连接
-ping -c 3 10.20.20.36
-```
-
-## 开发指南
-
-### 代码结构规范
-
-1. **硬件抽象层**: 每个硬件设备对应独立的类封装
-2. **业务逻辑层**: 在主窗口中处理用户交互
-3. **资源管理**: 使用 RAII 原则管理文件描述符和内存
-4. **错误处理**: 所有系统调用都检查返回值
-
-### 交叉编译注意事项
-
-1. **工具链选择**: 使用 `arm-linux-gnueabihf-gcc` 系列工具
-2. **库依赖**: 静态链接或部署共享库到开发板
-3. **调试符号**: 发布版本去除调试信息以减小体积
-4. **版本兼容**: 确保库版本与开发板系统匹配
-
-### 性能优化
-
-1. **缓冲区复用**: 避免频繁的内存分配和释放
-2. **事件驱动**: 使用定时器代替轮询
-3. **图像处理**: 使用硬件加速格式 (RGB565)
-4. **界面渲染**: 减少不必要的重绘
 
 ## 版本历史
 
@@ -292,18 +181,13 @@ ping -c 3 10.20.20.36
 |------|------|------|
 | v1.0 | 2024 | 初始版本，基础功能实现 |
 | v1.1 | 2024-12 | 添加 FPS 显示和性能优化 |
+| v1.2 | 2026-02-04 | **RELEASE 版本** - 集成 SR501 传感器，UI 布局优化，移除 PXP 改用纯 Qt 渲染 |
 
-## 许可证
 
-本项目仅供学习和研究使用。未经许可不得用于商业用途。
+## 项目效果
 
-## 致谢
 
-- 正点原子 ATK-IMX6U 开发板
-- Qt 开源框架
-- Linux V4L2 子系统
-- 所有开源社区贡献者
 
 ---
 
-*文档最后更新: 2026-01-23*
+**v1.2 RELEASE** - 文档最后更新: 2026-02-04

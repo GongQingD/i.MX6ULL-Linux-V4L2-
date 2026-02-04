@@ -1,0 +1,2 @@
+/home/ladykaka/Linux/Linux_Drivers/copy_project/ap3216c_光照传感器/ap3216c_drv.ko
+/home/ladykaka/Linux/Linux_Drivers/copy_project/ap3216c_光照传感器/ap3216c_drv.o

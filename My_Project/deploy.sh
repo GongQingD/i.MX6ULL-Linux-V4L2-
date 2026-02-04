@@ -14,8 +14,8 @@ REMOTE_DIR="/lib/modules/4.1.15-g3dc0a4b"
 
 # 3. 开发板的登录信息
 REMOTE_USER="root"
-REMOTE_HOST="10.20.20.36"
-REMOTE_PASS="2918"
+REMOTE_HOST="xxx"
+REMOTE_PASS="xxx"
 
 # --- 脚本正文 ---
 
