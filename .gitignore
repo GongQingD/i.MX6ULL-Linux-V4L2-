@@ -5,3 +5,6 @@ driver_file/led_drv/deploy.sh
 .claude/
 driver_file/ft5x06_lcd屏幕
 resume.tex
+My_Project/BOARD_CONTEXT.md
+My_Project/CLAUDE_CODE_GUIDELINES.md
+.gitignore
