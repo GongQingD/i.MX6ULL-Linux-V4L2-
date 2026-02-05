@@ -11,7 +11,7 @@ LOCAL_EXECUTABLE_PATH="../build-Camera_Project-ATK_I_MX6U-Debug/Camera_Project"
 
 # 2. 开发板的目标目录
 REMOTE_DIR="/lib/modules/4.1.15-g3dc0a4b"
-
+# 2. 开发板的目标目录
 # 3. 开发板的登录信息
 REMOTE_USER="root"
 REMOTE_HOST="xxx"
