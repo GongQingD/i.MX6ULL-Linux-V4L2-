@@ -40,6 +40,12 @@ MainWindow::MainWindow(QWidget *parent)
     if (dht11_fd < 0)
         printf("open dht11 failed.");
 
+    sr501_fd = open(sr501_drv.toStdString().c_str(), O_RDWR);
+    if (sr501_fd < 0) {
+        printf("open sr501 failed.");
+        ui->label_people->setText("--");
+    }
+
     ap3216c_timer = new QTimer();
     connect(ap3216c_timer, &QTimer::timeout, this, &MainWindow::ap3216c_timeout);
     ap3216c_timer->start(1000);
@@ -57,6 +63,9 @@ MainWindow::~MainWindow()
 
     if (dht11_fd >= 0)
         ::close(dht11_fd);
+
+    if (sr501_fd >= 0)
+        ::close(sr501_fd);
 
     if (cameraProcess) {
         if (cameraProcess->state() == QProcess::Running) {
@@ -120,6 +129,18 @@ void MainWindow::ap3216c_timeout()
     ui->label_ir->setNum(ir);
     ui->label_light->setNum(als);
     ui->label_dis->setNum(ps);
+
+    if (sr501_fd >= 0) {
+        char sr501_state = 0;
+        lseek(sr501_fd, 0, SEEK_SET);
+        if (read(sr501_fd, &sr501_state, 1) == 1) {
+            ui->label_people->setNum(sr501_state != 0 ? 1 : 0);
+        } else {
+            ui->label_people->setText("ERR");
+        }
+    } else {
+        ui->label_people->setText("--");
+    }
 
     dht11_count++;
     if (dht11_count >= 3) {

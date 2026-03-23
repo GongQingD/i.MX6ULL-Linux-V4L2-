@@ -27,11 +27,12 @@ private slots:
 private:
     Ui::MainWindow *ui;
 
-    int led_fd, ap3216c_fd, dht11_fd;
+    int led_fd, ap3216c_fd, dht11_fd, sr501_fd;
 
     QString led_drv = "/dev/led";
     QString ap3216c_drv = "/dev/ap3216c";
     QString dht11_drv = "/dev/dht11";
+    QString sr501_drv = "/dev/sr501";
 
     QTimer *ap3216c_timer;
     QProcess *cameraProcess;
