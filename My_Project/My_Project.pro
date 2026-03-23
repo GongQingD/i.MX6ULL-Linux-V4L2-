@@ -8,10 +8,12 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    sr501_async.cpp
 
 HEADERS += \
-    mainwindow.h
+    mainwindow.h \
+    sr501_async.h
 
 FORMS += \
     mainwindow.ui

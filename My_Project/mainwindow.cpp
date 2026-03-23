@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "sr501_async.h"
 #include "ui_mainwindow.h"
 
 #include <stdio.h>
@@ -15,8 +16,26 @@
 #include <errno.h>
 #include <termios.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <linux/input.h>
 #include <sys/ioctl.h>
+
+namespace {
+
+int g_sr501SignalWriteFd = -1;
+
+void sr501SigioHandler(int)
+{
+    if (g_sr501SignalWriteFd < 0) {
+        return;
+    }
+
+    const char pending = 1;
+    const ssize_t ret = ::write(g_sr501SignalWriteFd, &pending, sizeof(pending));
+    (void)ret;
+}
+
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -44,6 +63,8 @@ MainWindow::MainWindow(QWidget *parent)
     if (sr501_fd < 0) {
         printf("open sr501 failed.");
         ui->label_people->setText("--");
+    } else {
+        updateSr501Label();
     }
 
     ap3216c_timer = new QTimer();
@@ -51,10 +72,19 @@ MainWindow::MainWindow(QWidget *parent)
     ap3216c_timer->start(1000);
 
     cameraProcess = nullptr;
+    sr501Notifier = nullptr;
+    sr501SignalFds[0] = -1;
+    sr501SignalFds[1] = -1;
+
+    if (sr501_fd >= 0 && !setupSr501Async()) {
+        qDebug() << "SR501 async notification setup failed, label will not auto-refresh";
+    }
 }
 
 MainWindow::~MainWindow()
 {
+    teardownSr501Async();
+
     if (led_fd >= 0)
         ::close(led_fd);
 
@@ -130,18 +160,6 @@ void MainWindow::ap3216c_timeout()
     ui->label_light->setNum(als);
     ui->label_dis->setNum(ps);
 
-    if (sr501_fd >= 0) {
-        char sr501_state = 0;
-        lseek(sr501_fd, 0, SEEK_SET);
-        if (read(sr501_fd, &sr501_state, 1) == 1) {
-            ui->label_people->setNum(sr501_state != 0 ? 1 : 0);
-        } else {
-            ui->label_people->setText("ERR");
-        }
-    } else {
-        ui->label_people->setText("--");
-    }
-
     dht11_count++;
     if (dht11_count >= 3) {
         dht11_count = 0;
@@ -174,6 +192,89 @@ void MainWindow::ap3216c_timeout()
         ui->label_hum->setText(QString::number(humidity, 'f', 1));
         ui->label_tmp->setText(QString::number(temperature, 'f', 1));
     }
+}
+
+bool MainWindow::setupSr501Async()
+{
+    if (sr501_fd < 0) {
+        return false;
+    }
+
+    if (!Sr501Async::createSignalPipe(sr501SignalFds)) {
+        qDebug() << "create sr501 signal pipe failed:" << strerror(errno);
+        return false;
+    }
+
+    g_sr501SignalWriteFd = sr501SignalFds[0];
+
+    sr501Notifier = new QSocketNotifier(sr501SignalFds[1], QSocketNotifier::Read, this);
+    connect(sr501Notifier, &QSocketNotifier::activated, this, &MainWindow::handleSr501Notification);
+
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = sr501SigioHandler;
+    sigemptyset(&action.sa_mask);
+    if (::sigaction(SIGIO, &action, nullptr) < 0) {
+        qDebug() << "sigaction(SIGIO) failed:" << strerror(errno);
+        teardownSr501Async();
+        return false;
+    }
+
+    if (!Sr501Async::configureAsyncNotification(sr501_fd, ::getpid())) {
+        qDebug() << "configure SR501 async notification failed:" << strerror(errno);
+        teardownSr501Async();
+        return false;
+    }
+
+    return true;
+}
+
+void MainWindow::teardownSr501Async()
+{
+    if (sr501_fd >= 0) {
+        int flags = ::fcntl(sr501_fd, F_GETFL);
+        if (flags >= 0) {
+            ::fcntl(sr501_fd, F_SETFL, flags & ~O_ASYNC);
+        }
+    }
+
+    ::signal(SIGIO, SIG_DFL);
+    g_sr501SignalWriteFd = -1;
+
+    if (sr501Notifier) {
+        sr501Notifier->setEnabled(false);
+        delete sr501Notifier;
+        sr501Notifier = nullptr;
+    }
+
+    Sr501Async::closeSignalPipe(sr501SignalFds);
+}
+
+void MainWindow::updateSr501Label()
+{
+    if (sr501_fd < 0) {
+        ui->label_people->setText("--");
+        return;
+    }
+
+    int state = 0;
+    if (Sr501Async::readDeviceState(sr501_fd, state)) {
+        ui->label_people->setNum(state);
+    } else {
+        ui->label_people->setText("ERR");
+    }
+}
+
+void MainWindow::handleSr501Notification()
+{
+    if (!sr501Notifier) {
+        return;
+    }
+
+    sr501Notifier->setEnabled(false);
+    Sr501Async::drainSignalPipe(sr501SignalFds[1]);
+    updateSr501Label();
+    sr501Notifier->setEnabled(true);
 }
 
 void MainWindow::on_pushButton_4_clicked()
