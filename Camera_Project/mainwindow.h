@@ -7,26 +7,21 @@
 #include <QTimer>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
-#include <QMouseEvent> // 新增
-#include <QEvent> // 新增
-#include <QTouchEvent> // 新增
-#include <QSocketNotifier> 
-#include <QListWidget> 
+#include <QMouseEvent>
+#include <QSocketNotifier>
+#include <QListWidget>
 #include <QListWidgetItem>
 #include <QDialog>
-#include <QGridLayout> // 新增
-#include <QResizeEvent> // 新增：用于resize事件
+#include <QGridLayout>
+#include <QResizeEvent>
 #include "v4l2_device.h"
-#include "pxp_processor.h"
 
-// 新增：自定义图片查看器对话框类，支持滑动切换
 class ImageViewerDialog : public QDialog {
     Q_OBJECT
 public:
     ImageViewerDialog(const QStringList &paths, int currentIndex, QWidget *parent = nullptr);
 
 protected:
-    // 重写鼠标/触摸事件以检测滑动
     void mousePressEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
 
@@ -52,8 +47,8 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);// 构造函数
-    ~MainWindow();// 析构函数
+    MainWindow(QWidget *parent = nullptr);
+    ~MainWindow();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -61,45 +56,38 @@ protected:
 private slots:
     void updateFrame();
     void captureImage();
-    void handleSigInt(); // 新增：处理 Ctrl+C 信号
-    void onFileItemClicked(QListWidgetItem *item); // 新增：点击文件列表
-    void onExitButtonClicked(); // 新增：退出按钮点击
+    void handleSigInt();
+    void onFileItemClicked(QListWidgetItem *item);
+    void onExitButtonClicked();
 
 private:
     QWidget *centralWidget;
     QLabel *videoLabel;
-    QLabel *fpsLabel;               // 新增：FPS显示标签
+    QLabel *fpsLabel;
     QPushButton *captureButton;
-    QPushButton *exitButton; // 新增：退出按钮
-    QListWidget *fileListWidget; // 新增：文件列表
-    // QVBoxLayout *rightLayout; // 删除：不再需要单独的右侧布局
+    QPushButton *exitButton;
+    QListWidget *fileListWidget;
     QHBoxLayout *mainLayout;
 
     V4L2Device *camera;
-    QSocketNotifier *frameNotifier;  // 替代 QTimer *timer
-    QImage currentImage;             // 用于拍照的深拷贝图像
-    QImage currentRawImage;          // 当前帧的浅拷贝引用，用于显示
-    QSocketNotifier *sigIntNotifier; // 新增
+    QSocketNotifier *frameNotifier;
+    QImage currentImage;
+    QImage currentRawImage;
+    QSocketNotifier *sigIntNotifier;
 
-    // PXP硬件加速处理器（混合方案：PXP失败则回退到Qt）
-    PXPProcessor *pxpProcessor;
+    QSize scaledSize;
 
-    // 预计算缩放优化
-    QSize scaledSize;               // 缓存缩放后的尺寸
-
-    // 帧率统计相关变量
     int frameCount;
     qint64 lastFpsUpdateTime;
     qint64 lastFrameTime;
-    qint64 lastDisplayTime;     // 上一帧显示完成时间
+    qint64 lastDisplayTime;
 
-    // 延迟统计结构
     struct LatencyStats {
-        qint64 total_io;        // T1 - lastDisplayTime 累加 (毫秒)：IO等待时间
-        qint64 total_process;   // T3 - T2 累加 (毫秒)：图像处理时间
-        qint64 total_display;   // T4 - T3 累加 (毫秒)：Qt显示时间
-        qint64 total_frames;    // 总帧数（未使用）
-        int stat_frame_count;   // 当前统计窗口帧数
+        qint64 total_io;
+        qint64 total_process;
+        qint64 total_display;
+        qint64 total_frames;
+        int stat_frame_count;
     } latency_stats;
 };
 

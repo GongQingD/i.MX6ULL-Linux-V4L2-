@@ -4,44 +4,36 @@
 #include <QDebug>
 #include <QDir>
 #include <QMouseEvent>
-#include <QApplication> // 必须包含：修复 incomplete type 'QApplication' 错误
-#include <QScreen>      // 必须包含：用于 primaryScreen()
+#include <QApplication>
+#include <QScreen>
 #include <sys/socket.h>
 #include <signal.h>
 #include <unistd.h>
-
-// --- ImageViewerDialog 实现 ---
+#include <stdlib.h>
 
 ImageViewerDialog::ImageViewerDialog(const QStringList &paths, int currentIndex, QWidget *parent)
     : QDialog(parent), m_paths(paths), m_currentIndex(currentIndex)
 {
-    // 全屏、无边框、置顶、接受触摸
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_AcceptTouchEvents);
     setStyleSheet("background-color: black;");
 
-    // 使用 QGridLayout 将控件层覆盖在图片层之上
     QGridLayout *mainLayout = new QGridLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
 
-    // 层 0: 图片显示 (位于底层)
     m_label = new QLabel(this);
     m_label->setAlignment(Qt::AlignCenter);
-    // 将 label 放入 (0,0)
     mainLayout->addWidget(m_label, 0, 0);
 
-    // 层 1: 控制按钮 (位于顶层)
     QWidget *controlPage = new QWidget(this);
-    controlPage->setStyleSheet("background: transparent;"); // 背景透明
-    
+    controlPage->setStyleSheet("background: transparent;");
+
     QVBoxLayout *controlLayout = new QVBoxLayout(controlPage);
-    
-    // 中间部分：左右箭头
+
     QHBoxLayout *arrowLayout = new QHBoxLayout();
     m_leftBtn = new QPushButton("<", this);
     m_rightBtn = new QPushButton(">", this);
-    
-    // 设置箭头样式：半透明白色圆底，黑色箭头
+
     QString arrowStyle = "QPushButton { background-color: rgba(255, 255, 255, 150); color: black; border-radius: 30px; font-size: 30px; font-weight: bold; } QPushButton:pressed { background-color: rgba(255, 255, 255, 220); }";
     m_leftBtn->setFixedSize(60, 60);
     m_leftBtn->setStyleSheet(arrowStyle);
@@ -49,27 +41,24 @@ ImageViewerDialog::ImageViewerDialog(const QStringList &paths, int currentIndex,
     m_rightBtn->setStyleSheet(arrowStyle);
 
     arrowLayout->addWidget(m_leftBtn);
-    arrowLayout->addStretch(); // 中间弹簧，把按钮推向两边
+    arrowLayout->addStretch();
     arrowLayout->addWidget(m_rightBtn);
 
-    // 底部部分：退出按钮
     QHBoxLayout *bottomLayout = new QHBoxLayout();
-    bottomLayout->addStretch(); // 左侧弹簧，把按钮推向右边
+    bottomLayout->addStretch();
     m_exitBtn = new QPushButton("退出", this);
     m_exitBtn->setFixedSize(100, 50);
     m_exitBtn->setStyleSheet("QPushButton { background-color: #d9534f; color: white; font-size: 18px; border-radius: 10px; border: 2px solid white; } QPushButton:pressed { background-color: #c9302c; }");
     bottomLayout->addWidget(m_exitBtn);
 
-    controlLayout->addStretch(1); // 顶部弹簧
-    controlLayout->addLayout(arrowLayout); // 中间箭头区域
-    controlLayout->addStretch(1); // 底部弹簧
-    controlLayout->addLayout(bottomLayout); // 底部退出按钮
-    controlLayout->setContentsMargins(20, 20, 20, 20); // 设置边距
+    controlLayout->addStretch(1);
+    controlLayout->addLayout(arrowLayout);
+    controlLayout->addStretch(1);
+    controlLayout->addLayout(bottomLayout);
+    controlLayout->setContentsMargins(20, 20, 20, 20);
 
-    // 将 controlPage 也放入 (0,0)，这样它会覆盖在 m_label 上
     mainLayout->addWidget(controlPage, 0, 0);
 
-    // 连接信号
     connect(m_leftBtn, &QPushButton::clicked, this, &ImageViewerDialog::onPrevClicked);
     connect(m_rightBtn, &QPushButton::clicked, this, &ImageViewerDialog::onNextClicked);
     connect(m_exitBtn, &QPushButton::clicked, this, &QDialog::accept);
@@ -80,7 +69,7 @@ ImageViewerDialog::ImageViewerDialog(const QStringList &paths, int currentIndex,
 void ImageViewerDialog::showImage(int index)
 {
     if (index < 0 || index >= m_paths.size()) return;
-    
+
     QPixmap pix(m_paths[index]);
     if (!pix.isNull()) {
         m_label->setPixmap(pix.scaled(QApplication::primaryScreen()->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -93,7 +82,6 @@ void ImageViewerDialog::showImage(int index)
 
 void ImageViewerDialog::updateButtonState()
 {
-    // 到顶时隐藏左箭头，到底时隐藏右箭头
     m_leftBtn->setVisible(m_currentIndex > 0);
     m_rightBtn->setVisible(m_currentIndex < m_paths.size() - 1);
 }
@@ -125,24 +113,17 @@ void ImageViewerDialog::mouseReleaseEvent(QMouseEvent *event)
     int dy = event->pos().y() - m_startPos.y();
     int swipeThreshold = 50;
 
-    // 保留滑动功能
     if (abs(dx) > swipeThreshold && abs(dx) > abs(dy)) {
-        if (dx > 0) onPrevClicked(); // 向右滑 -> 上一张
-        else onNextClicked();        // 向左滑 -> 下一张
+        if (dx > 0) onPrevClicked();
+        else onNextClicked();
     }
-    // 移除了“点击任意位置关闭”的功能，现在必须点击退出按钮
 }
 
-// --- MainWindow 实现 ---
-
-// 用于信号处理的 socket pair
 static int sigIntFd[2];
 
-// Unix 信号处理函数
 void sigIntHandler(int)
 {
     char a = 1;
-    // 在信号处理函数中只能调用异步信号安全的函数，write 是安全的
     ::write(sigIntFd[0], &a, sizeof(a));
 }
 
@@ -153,70 +134,30 @@ MainWindow::MainWindow(QWidget *parent)
       lastFrameTime(0),
       lastDisplayTime(0),
       latency_stats({0, 0, 0, 0, 0}),
-      scaledSize(0, 0),
-      pxpProcessor(nullptr)
+      scaledSize(0, 0)
 {
-    // 尝试初始化PXP硬件加速（混合方案：PXP失败则回退到Qt渲染）
-    pxpProcessor = new PXPProcessor();
-    if (!pxpProcessor->init("/dev/fb0")) {
-        fprintf(stderr, "PXP initialization failed, falling back to Qt rendering\n");
-        delete pxpProcessor;
-        pxpProcessor = nullptr;
-    } else {
-        fprintf(stderr, "PXP hardware acceleration enabled\n");
-    }
-
-    // 设置窗口标志：无边框且置顶
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
-    
-    // 1. 设置 UI
-    centralWidget = new QWidget(this);
 
-    // 开启自动填充背景，并设置为黑色
+    centralWidget = new QWidget(this);
     centralWidget->setAutoFillBackground(true);
     QPalette pal = centralWidget->palette();
     pal.setColor(QPalette::Window, Qt::black);
     centralWidget->setPalette(pal);
-    
-    // 关键：设置属性，告诉系统该窗口完全不透明
-    setAttribute(Qt::WA_OpaquePaintEvent);
 
+    setAttribute(Qt::WA_OpaquePaintEvent);
     setCentralWidget(centralWidget);
 
-    // --- 左侧布局 ---
     QVBoxLayout *leftLayout = new QVBoxLayout();
 
-    // 1.1 摄像头显示区域 (左上)
-    // 创建容器Widget来放置摄像头图像和FPS叠加
     QWidget *videoContainer = new QWidget(this);
     videoContainer->setGeometry(0, 0, 768, 450);
 
-    // videoLabel 使用绝对定位，占据整个 videoContainer
     videoLabel = new QLabel("Camera Feed", videoContainer);
     videoLabel->setGeometry(0, 0, 768, 450);
     videoLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    
-    // === PXP 模式：让 videoLabel 透明，不遮挡 framebuffer ===
-    if (pxpProcessor) {
-        // 设置 videoLabel 完全透明，让 PXP 直接写入的 framebuffer 内容可见
-        videoLabel->setAttribute(Qt::WA_TranslucentBackground, true);
-        videoLabel->setAttribute(Qt::WA_NoSystemBackground, true);
-        videoLabel->setAutoFillBackground(false);
-        videoLabel->setStyleSheet("background: transparent; border: none;");
-        videoLabel->setText(""); // 清空文字
-        
-        // videoContainer 也需要透明
-        videoContainer->setAttribute(Qt::WA_TranslucentBackground, true);
-        videoContainer->setAttribute(Qt::WA_NoSystemBackground, true);
-        videoContainer->setAutoFillBackground(false);
-        videoContainer->setStyleSheet("background: transparent;");
-    } else {
-        // Qt 渲染模式：保持原有样式
-        videoLabel->setStyleSheet("border: none; background-color: #333;");
-        videoLabel->setAttribute(Qt::WA_OpaquePaintEvent, true);
-    }
+    videoLabel->setStyleSheet("border: none; background-color: #333;");
+    videoLabel->setAttribute(Qt::WA_OpaquePaintEvent, true);
 
-    // 创建FPS显示标签，叠加在摄像头图像上方
     fpsLabel = new QLabel("FPS: --", videoContainer);
     fpsLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     fpsLabel->setStyleSheet("background-color: rgba(0, 0, 0, 180); color: #00FF00; font-size: 16px; font-weight: bold; padding: 5px; border-radius: 5px;");
@@ -224,42 +165,32 @@ MainWindow::MainWindow(QWidget *parent)
     fpsLabel->setGeometry(10, 10, 140, 100);
     fpsLabel->raise();
 
-    leftLayout->addWidget(videoContainer, 3); // 占据左侧 3/4 高度
+    leftLayout->addWidget(videoContainer, 3);
 
-    // 1.2 照片列表区域 (左下)
     fileListWidget = new QListWidget(this);
     fileListWidget->setStyleSheet("font-size: 16px;");
     connect(fileListWidget, &QListWidget::itemClicked, this, &MainWindow::onFileItemClicked);
-    leftLayout->addWidget(fileListWidget, 1); // 占据左侧 1/4 高度
+    leftLayout->addWidget(fileListWidget, 1);
 
-    // --- 右侧布局 ---
     QVBoxLayout *rightLayout = new QVBoxLayout();
 
-    // 1.3 拍照按钮 (右侧上部)
     captureButton = new QPushButton("拍照", this);
-    captureButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding); // 填满右侧
-    // 使用更明显的颜色对比：黄色背景，黑色边框，黑色文字
+    captureButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     captureButton->setStyleSheet("font-size: 32px; font-weight: bold; background-color: #FFD700; color: black; border: 5px solid black; border-radius: 15px; padding: 10px;");
 
-    // 1.4 退出按钮 (右侧下部)
     exitButton = new QPushButton("退出", this);
     exitButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    // 红色背景，白色文字
     exitButton->setStyleSheet("font-size: 32px; font-weight: bold; background-color: #d9534f; color: white; border: 5px solid white; border-radius: 15px; padding: 10px; margin-top: 10px;");
 
-    // 将按钮添加到右侧布局
-    rightLayout->addWidget(captureButton, 3); // 拍照按钮占3/4高度
-    rightLayout->addWidget(exitButton, 1); // 退出按钮占1/4高度
+    rightLayout->addWidget(captureButton, 3);
+    rightLayout->addWidget(exitButton, 1);
 
-    // --- 主布局 ---
     mainLayout = new QHBoxLayout(centralWidget);
-    mainLayout->addLayout(leftLayout, 3); // 左侧布局占 3/4 宽度
-    mainLayout->addLayout(rightLayout, 1); // 右侧布局占 1/4 宽度
+    mainLayout->addLayout(leftLayout, 3);
+    mainLayout->addLayout(rightLayout, 1);
 
-    // 2. 初始化摄像头
     camera = new V4L2Device();
 
-    // PXP相关配置已禁用，使用纯Qt渲染模式
     if (!camera->openDevice("/dev/video1")) {
         QMessageBox::critical(this, "Error", "Cannot open /dev/video1");
     } else {
@@ -267,28 +198,19 @@ MainWindow::MainWindow(QWidget *parent)
             QMessageBox::critical(this, "Error", "Cannot init device");
         } else {
             camera->startCapturing();
-            
-            // ===== 关键改动：使用 QSocketNotifier 替代 QTimer =====
             int fd = camera->getFileDescriptor();
             frameNotifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
-            connect(frameNotifier, &QSocketNotifier::activated, 
-                    this, &MainWindow::updateFrame);
-            // ===== 不再需要 timer->start(30) =====
+            connect(frameNotifier, &QSocketNotifier::activated, this, &MainWindow::updateFrame);
         }
     }
 
-
-    // 4. 连接按钮信号
     connect(captureButton, &QPushButton::clicked, this, &MainWindow::captureImage);
     connect(exitButton, &QPushButton::clicked, this, &MainWindow::onExitButtonClicked);
 
-    // 新增：配置 Ctrl+C 信号处理
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, sigIntFd) == 0) {
-        // 创建监听器，监听 sigIntFd[1] 的可读事件
         sigIntNotifier = new QSocketNotifier(sigIntFd[1], QSocketNotifier::Read, this);
         connect(sigIntNotifier, &QSocketNotifier::activated, this, &MainWindow::handleSigInt);
 
-        // 安装信号处理器
         struct sigaction sig;
         sig.sa_handler = sigIntHandler;
         sigemptyset(&sig.sa_mask);
@@ -296,10 +218,8 @@ MainWindow::MainWindow(QWidget *parent)
         sigaction(SIGINT, &sig, nullptr);
     }
 
-    // 新增：强制全屏显示
     showFullScreen();
 
-    // 预计算初始缩放尺寸
     if (camera && videoLabel) {
         QSize labelSize = videoLabel->size();
         QSize imageSize(camera->getWidth(), camera->getHeight());
@@ -313,36 +233,24 @@ MainWindow::~MainWindow()
         frameNotifier->setEnabled(false);
         delete frameNotifier;
     }
-    delete camera; // 正常退出时这里会被调用，关闭摄像头
-
-    // 清理PXP处理器
-    if (pxpProcessor) {
-        delete pxpProcessor;
-        pxpProcessor = nullptr;
-    }
+    delete camera;
 }
 
-// 窗口大小改变时更新缓存尺寸
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
-    // 计算videoLabel的实际显示尺寸
     QSize labelSize = videoLabel->size();
     if (camera) {
-        // 计算保持宽高比的缩放尺寸
         QSize imageSize(camera->getWidth(), camera->getHeight());
         scaledSize = imageSize.scaled(labelSize, Qt::KeepAspectRatio);
     }
 }
 
-// 新增：响应 Ctrl+C 信号
 void MainWindow::handleSigInt()
 {
     sigIntNotifier->setEnabled(false);
     char tmp;
     ::read(sigIntFd[1], &tmp, sizeof(tmp));
-
-    // 退出应用程序，这将触发析构函数
     QApplication::quit();
 }
 
@@ -351,32 +259,20 @@ void MainWindow::updateFrame()
     unsigned char *data = nullptr;
     size_t length = 0;
 
-    // T1: 用户接收到帧通知的时间（毫秒）
     qint64 T1 = QDateTime::currentMSecsSinceEpoch();
-
-    // 获取当前时间戳（毫秒）用于FPS计算
     qint64 currentTime = T1;
 
-    // 获取帧数据（忽略驱动时间戳，使用相对时间）
     if (camera->getFrame(&data, &length) != -1) {
-        // 更新帧计数
         frameCount++;
 
-        // 计算帧间延时（处理延时）
         if (lastFrameTime > 0) {
-            // 帧间隔可用于后续调试，暂时不显示
-            // qint64 frameInterval = currentTime - lastFrameTime;
-
-            // 每秒更新一次FPS显示
             if (lastFpsUpdateTime == 0) {
                 lastFpsUpdateTime = currentTime;
             } else if (currentTime - lastFpsUpdateTime >= 1000) {
-                // 计算FPS
                 double fps = frameCount * 1000.0 / (currentTime - lastFpsUpdateTime);
                 frameCount = 0;
                 lastFpsUpdateTime = currentTime;
 
-                // 计算平均延迟（如果至少有一帧）
                 QString latencyText = QString("FPS:%1").arg(fps, 0, 'f', 1);
                 if (latency_stats.stat_frame_count > 0) {
                     double avg_io = (double)latency_stats.total_io / latency_stats.stat_frame_count;
@@ -389,10 +285,8 @@ void MainWindow::updateFrame()
                         .arg(avg_display, 0, 'f', 1);
                 }
 
-                // 更新FPS显示
                 fpsLabel->setText(latencyText);
 
-                // 根据帧率改变颜色
                 if (fps >= 25) {
                     fpsLabel->setStyleSheet("background-color: rgba(0, 100, 0, 180); color: #00FF00; font-size: 16px; font-weight: bold; padding: 5px; border-radius: 5px;");
                 } else if (fps >= 15) {
@@ -401,7 +295,6 @@ void MainWindow::updateFrame()
                     fpsLabel->setStyleSheet("background-color: rgba(100, 0, 0, 180); color: #FF0000; font-size: 16px; font-weight: bold; padding: 5px; border-radius: 5px;");
                 }
 
-                // 重置延迟统计
                 latency_stats.total_io = 0;
                 latency_stats.total_process = 0;
                 latency_stats.total_display = 0;
@@ -412,45 +305,11 @@ void MainWindow::updateFrame()
 
         lastFrameTime = currentTime;
 
-        // T2: 图像处理开始时间
         qint64 T2 = QDateTime::currentMSecsSinceEpoch();
-
-        // RGB565 对应 QImage::Format_RGB16
-        // 使用浅拷贝引用，不复制数据（显示时使用）
         currentRawImage = QImage(data, camera->getWidth(), camera->getHeight(), QImage::Format_RGB16);
-
-        // T3: 图像处理结束时间
         qint64 T3 = QDateTime::currentMSecsSinceEpoch();
 
-        // 显示图像 - PXP硬件加速：直接写入framebuffer
-        if (pxpProcessor && pxpProcessor->isReady()) {
-            // PXP硬件加速：直接写入framebuffer，绕过Qt渲染管道
-            // 计算显示区域（左上角，占据3/4屏幕）
-            int screenWidth = pxpProcessor->getLCDWidth();
-            int screenHeight = pxpProcessor->getLCDHeight();
-            int videoWidth = screenWidth * 3 / 4;
-            int videoHeight = screenHeight * 3 / 4;
-
-            if (pxpProcessor->processFrame((const uint16_t *)data,
-                                                   camera->getWidth(),
-                                                   camera->getHeight(),
-                                                   0, 0,
-                                                   videoWidth, videoHeight)) {
-                // PXP处理成功，图像已直接写入framebuffer
-                // 不更新videoLabel，让PXP输出显示
-            } else {
-                // PXP处理失败，回退到Qt渲染
-                fprintf(stderr, "PXP: processFrame failed, fallback to Qt\n");
-                if (!currentRawImage.isNull()) {
-                    if (scaledSize.isValid()) {
-                        videoLabel->setPixmap(QPixmap::fromImage(currentRawImage).scaled(scaledSize, Qt::KeepAspectRatio, Qt::FastTransformation));
-                    } else {
-                        videoLabel->setPixmap(QPixmap::fromImage(currentRawImage).scaled(videoLabel->size(), Qt::KeepAspectRatio, Qt::FastTransformation));
-                    }
-                }
-            }
-        } else if (!currentRawImage.isNull()) {
-            // 纯Qt渲染模式
+        if (!currentRawImage.isNull()) {
             if (scaledSize.isValid()) {
                 videoLabel->setPixmap(QPixmap::fromImage(currentRawImage).scaled(scaledSize, Qt::KeepAspectRatio, Qt::FastTransformation));
             } else {
@@ -458,28 +317,21 @@ void MainWindow::updateFrame()
             }
         }
 
-        // T4: 显示完成时间
         qint64 T4 = QDateTime::currentMSecsSinceEpoch();
-
-        // 内存累加统计（开销最小）
-        // 计算IO等待时间：从上一帧显示完成到收到新帧通知的时间
         qint64 io_wait = (lastDisplayTime > 0) ? (T1 - lastDisplayTime) : 0;
-        latency_stats.total_io += io_wait;         // IO等待时间
-        latency_stats.total_process += (T3 - T2);  // 处理延迟：图像拷贝时间
-        latency_stats.total_display += (T4 - T3);  // 显示延迟：Qt 显示时间
+        latency_stats.total_io += io_wait;
+        latency_stats.total_process += (T3 - T2);
+        latency_stats.total_display += (T4 - T3);
         latency_stats.stat_frame_count++;
-        latency_stats.total_frames++;  // 保留字段，可用于其他统计
+        latency_stats.total_frames++;
 
-        // 更新上一帧显示完成时间，用于下一帧的IO等待计算
         lastDisplayTime = T4;
-
         camera->releaseFrame();
     }
 }
 
 void MainWindow::captureImage()
 {
-    // 拍照时从浅拷贝创建深拷贝
     if (!currentRawImage.isNull()) {
         currentImage = currentRawImage.copy();
     }
@@ -487,22 +339,18 @@ void MainWindow::captureImage()
     if (!currentImage.isNull()) {
         QString savePath = "/media/figure/";
         QDir dir;
-        // 如果目录不存在，则创建
         if (!dir.exists(savePath)) {
             dir.mkpath(savePath);
         }
 
         QString fileNameOnly = QString("capture_%1.jpg").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
         QString fullPath = savePath + fileNameOnly;
-        
-        if (currentImage.save(fullPath, "JPG")) {
-            
-            // 添加到列表
-            QListWidgetItem *item = new QListWidgetItem(fileNameOnly);
-            item->setData(Qt::UserRole, fullPath); // 存储完整路径以便打开
-            fileListWidget->insertItem(0, item); // 插入到最前面
 
-            // 保持只有5个
+        if (currentImage.save(fullPath, "JPG")) {
+            QListWidgetItem *item = new QListWidgetItem(fileNameOnly);
+            item->setData(Qt::UserRole, fullPath);
+            fileListWidget->insertItem(0, item);
+
             while (fileListWidget->count() > 5) {
                 delete fileListWidget->takeItem(fileListWidget->count() - 1);
             }
@@ -516,14 +364,12 @@ void MainWindow::captureImage()
 
 void MainWindow::onFileItemClicked(QListWidgetItem *item)
 {
-    // 1. 收集当前列表中所有图片的路径
     QStringList paths;
     int currentIndex = 0;
-    
-    for(int i = 0; i < fileListWidget->count(); ++i) {
+
+    for (int i = 0; i < fileListWidget->count(); ++i) {
         QListWidgetItem *it = fileListWidget->item(i);
         paths.append(it->data(Qt::UserRole).toString());
-        // 找到用户点击的那张图片的索引
         if (it == item) {
             currentIndex = i;
         }
@@ -531,24 +377,19 @@ void MainWindow::onFileItemClicked(QListWidgetItem *item)
 
     if (paths.isEmpty()) return;
 
-    // 2. 启动自定义查看器
     ImageViewerDialog viewer(paths, currentIndex, this);
-    viewer.showFullScreen();// 请求显示
-    viewer.exec();// 模态运行（阻塞在这里直到关闭）
+    viewer.showFullScreen();
+    viewer.exec();
 }
 
-/* 退出按钮点击事件 - 关闭摄像头应用，返回智能家居界面 */
 void MainWindow::onExitButtonClicked()
 {
     qDebug() << "退出监控画面，返回智能家居界面";
 
-
-    // 关闭摄像头
     if (camera) {
         camera->stopCapturing();
         camera->closeDevice();
     }
 
-    // 关闭应用程序
     QApplication::quit();
 }

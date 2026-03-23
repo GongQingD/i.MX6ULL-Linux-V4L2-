@@ -33,10 +33,7 @@ private:
     QString ap3216c_drv = "/dev/ap3216c";
     QString dht11_drv = "/dev/dht11";
 
-    /* 定时器 */
     QTimer *ap3216c_timer;
-
-    /* Camera进程 */
     QProcess *cameraProcess;
 
     unsigned char buf[10];
