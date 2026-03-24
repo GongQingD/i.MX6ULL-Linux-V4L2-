@@ -183,7 +183,7 @@ int V4L2Device::getFrame(unsigned char **data, size_t *length) {
             // 继续执行，不返回错误
         }
     }
-
+    // currentBuffer保存的是当前已经准备好可读取的帧缓冲的描述信息
     memset(&currentBuffer, 0, sizeof(currentBuffer));
     currentBuffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     currentBuffer.memory = V4L2_MEMORY_MMAP;
@@ -191,7 +191,7 @@ int V4L2Device::getFrame(unsigned char **data, size_t *length) {
     if (ioctl(fd, VIDIOC_DQBUF, &currentBuffer) == -1) {
         return -1; // 暂时没有数据或错误
     }
-
+    // 通过currentBuffer保存的索引获取当前可读帧数据的经过mmap映射的首地址和长度
     *data = (unsigned char*)buffers[currentBuffer.index].start;
     *length = currentBuffer.bytesused;
 

@@ -328,42 +328,6 @@
      <string>0</string>
     </property>
    </widget>
-   <widget class="QLabel" name="label_8">
-    <property name="geometry">
-     <rect>
-      <x>600</x>
-      <y>390</y>
-      <width>71</width>
-      <height>34</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <pointsize>20</pointsize>
-     </font>
-    </property>
-    <property name="text">
-     <string>空气:</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_air">
-    <property name="geometry">
-     <rect>
-      <x>690</x>
-      <y>390</y>
-      <width>71</width>
-      <height>34</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <pointsize>20</pointsize>
-     </font>
-    </property>
-    <property name="text">
-     <string>300</string>
-    </property>
-   </widget>
   </widget>
  </widget>
  <resources/>
