@@ -108,9 +108,9 @@ bool readDeviceState(int sr501Fd, int &state)
     }
 
     char rawState = 0;
-    if (::lseek(sr501Fd, 0, SEEK_SET) < 0) {
-        return false;
-    }
+    // Some char drivers do not implement llseek. Keep the legacy behavior:
+    // attempt to rewind, but still try read() even if lseek fails.
+    (void)::lseek(sr501Fd, 0, SEEK_SET);
 
     if (::read(sr501Fd, &rawState, 1) != 1) {
         return false;

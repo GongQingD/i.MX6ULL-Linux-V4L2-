@@ -171,25 +171,15 @@ cd My_Project
 
 - ==如何将驱动文件下载到开发板，请参考正点原子IMX6ULL教程==
 
-将驱动文件在开发板部署，可以写一个脚本在开发板，一键部署所有驱动并启动QT界面
+将驱动文件在开发板部署后，默认建议使用仓库内的预加载脚本思路。当前远程启动的基线命令是：
 ```bash
-#!/bin/sh
-set -e
+cp scripts/preload_drivers.sh /lib/modules/4.1.15-g3dc0a4b/preload_drivers.sh
+chmod +x /lib/modules/4.1.15-g3dc0a4b/preload_drivers.sh
 
-mod_list="led_drv ap3216c_drv dht11_drv sr501_drv"
-# The modules to be loaded.
-for name in $mod_list; do
-    ko="./${name}.ko"
-    if [ -f "$ko" ]; then
-        echo "[INFO] loading $ko"
-        insmod "$ko" || echo "[WARN] $ko already inserted?"
-    else
-        echo "[ERROR] missing $ko"
-    fi
-done
-
-./My_Project
+ssh root@10.20.20.36 "bash -l -c 'cd /lib/modules/4.1.15-g3dc0a4b && ./preload_drivers.sh'"
 ```
+
+这条命令的目的不是把脚本内容改复杂，而是让远程执行环境尽量接近你在板端手动登录后再运行 `./preload_drivers.sh` 的效果。`bash -l -c` 会走 login shell，比直接 `ssh 'cd ... && ./preload_drivers.sh'` 更接近现场手工操作。
 
 
 ## 版本历史

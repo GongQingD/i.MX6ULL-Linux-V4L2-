@@ -12,6 +12,8 @@
 #include <QMouseEvent>
 #include <QTimer>
 #include <QProcess>
+#include <QApplication>
+#include <QPalette>
 #include <thread>
 #include <errno.h>
 #include <termios.h>
@@ -42,10 +44,14 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
-
-    setWindowState(Qt::WindowFullScreen);
-    setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint);
-    show();
+    applyDashboardStyle();
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    ui->label_ir->setText("--");
+    ui->label_light->setText("--");
+    ui->label_dis->setText("--");
+    ui->label_tmp->setText("--");
+    ui->label_hum->setText("--");
+    ui->label_people->setText("--");
 
     led_fd = open(led_drv.toStdString().c_str(), O_RDWR);
     if (led_fd < 0)
@@ -79,6 +85,10 @@ MainWindow::MainWindow(QWidget *parent)
     if (sr501_fd >= 0 && !setupSr501Async()) {
         qDebug() << "SR501 async notification setup failed, label will not auto-refresh";
     }
+
+    refreshDashboardSnapshot();
+
+    QTimer::singleShot(0, this, [this]() { refreshDashboardSnapshot(); });
 }
 
 MainWindow::~MainWindow()
@@ -139,8 +149,20 @@ void MainWindow::ap3216c_timeout()
     static int dht11_count = 0;
     unsigned short ir, als, ps;
 
+    if (ap3216c_fd < 0) {
+        ui->label_ir->setText("--");
+        ui->label_light->setText("--");
+        ui->label_dis->setText("--");
+        return;
+    }
+
     lseek(ap3216c_fd, 0, SEEK_SET);
-    read(ap3216c_fd, buf, 6);
+    if (read(ap3216c_fd, buf, 6) != 6) {
+        ui->label_ir->setText("ERR");
+        ui->label_light->setText("ERR");
+        ui->label_dis->setText("ERR");
+        return;
+    }
 
     int is_data_valid = ((buf[0] & 0x80) == 0) && ((buf[4] & 0x40) == 0);
 
@@ -192,6 +214,53 @@ void MainWindow::ap3216c_timeout()
         ui->label_hum->setText(QString::number(humidity, 'f', 1));
         ui->label_tmp->setText(QString::number(temperature, 'f', 1));
     }
+}
+
+void MainWindow::applyDashboardStyle()
+{
+    if (ui->centralwidget) {
+        ui->centralwidget->setAutoFillBackground(true);
+        QPalette palette = ui->centralwidget->palette();
+        palette.setColor(QPalette::Window, QColor(245, 245, 245));
+        palette.setColor(QPalette::WindowText, QColor(20, 20, 20));
+        ui->centralwidget->setPalette(palette);
+    }
+
+    setStyleSheet(
+        "QWidget#centralwidget { background-color: rgb(245, 245, 245); color: rgb(20, 20, 20); }"
+        "QLabel { color: rgb(20, 20, 20); background: transparent; }"
+        "QPushButton { color: rgb(20, 20, 20); }"
+        "QLabel#label { color: rgb(20, 20, 20); background-color: rgb(114, 159, 207); }");
+}
+
+void MainWindow::restoreDashboardWindow()
+{
+    setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    showFullScreen();
+    raise();
+    activateWindow();
+
+    if (centralWidget()) {
+        centralWidget()->show();
+        centralWidget()->update();
+        centralWidget()->repaint();
+    }
+
+    update();
+    repaint();
+    QApplication::processEvents();
+}
+
+void MainWindow::refreshDashboardSnapshot()
+{
+    ap3216c_timeout();
+    updateSr501Label();
+
+    if (centralWidget()) {
+        centralWidget()->update();
+    }
+
+    update();
 }
 
 bool MainWindow::setupSr501Async()
@@ -323,7 +392,16 @@ void MainWindow::handleCameraFinished(int exitCode, QProcess::ExitStatus exitSta
         cameraProcess = nullptr;
     }
 
-    this->show();
-    this->raise();
-    this->activateWindow();
+    restoreDashboardWindow();
+    refreshDashboardSnapshot();
+
+    QTimer::singleShot(0, this, [this]() {
+        restoreDashboardWindow();
+        refreshDashboardSnapshot();
+    });
+
+    QTimer::singleShot(100, this, [this]() {
+        restoreDashboardWindow();
+        refreshDashboardSnapshot();
+    });
 }

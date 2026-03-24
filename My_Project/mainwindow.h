@@ -27,6 +27,9 @@ private slots:
     void handleCameraFinished(int exitCode, QProcess::ExitStatus exitStatus);
 
 private:
+    void applyDashboardStyle();
+    void restoreDashboardWindow();
+    void refreshDashboardSnapshot();
     bool setupSr501Async();
     void teardownSr501Async();
     void updateSr501Label();
