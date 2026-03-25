@@ -1,5 +1,7 @@
+#include "camera_launch_plan.h"
 #include "mainwindow.h"
 #include "linkage_logic.h"
+#include "perf_event.h"
 #include "sr501_async.h"
 #include "ui_mainwindow.h"
 
@@ -90,6 +92,7 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     refreshDashboardSnapshot();
+    logPerfEvent("my_project_started");
 
     QTimer::singleShot(0, this, [this]() { refreshDashboardSnapshot(); });
 }
@@ -367,10 +370,11 @@ void MainWindow::evaluateAndApplyLinkage(bool allowCameraDecision, bool allowLed
         return;
     }
 
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     LinkageState previousState = linkageState_;
     const LinkageDecision rawDecision = evaluateLinkage(linkageState_,
                                                         sensorSnapshot_,
-                                                        QDateTime::currentMSecsSinceEpoch());
+                                                        nowMs);
     LinkageDecision decision = rawDecision;
 
     if (!allowCameraDecision) {
@@ -386,6 +390,24 @@ void MainWindow::evaluateAndApplyLinkage(bool allowCameraDecision, bool allowLed
         linkageState_.ledOn = previousState.ledOn;
         decision.setLed = false;
         decision.ledOn = previousState.ledOn;
+    }
+
+    if (allowCameraDecision && decision.startCamera) {
+        const int sessionId = reserveCameraSession(true);
+        logPerfEvent("motion_auto_trigger",
+                     {{"session_id", QString::number(sessionId)},
+                      {"source", "sr501"},
+                      {"value", "1"}});
+        logPerfEvent("camera_auto_start_requested",
+                     {{"session_id", QString::number(sessionId)},
+                      {"trigger_ts_ms", QString::number(nowMs)}});
+    }
+
+    if (allowLedDecision && decision.darkTriggered) {
+        currentDarkTriggerTsMs_ = nowMs;
+        logPerfEvent("als_dark_trigger",
+                     {{"als", QString::number(sensorSnapshot_.als)},
+                      {"trigger_ts_ms", QString::number(nowMs)}});
     }
 
     if (decision.setLed && !setLedState(decision.ledOn)) {
@@ -406,6 +428,9 @@ void MainWindow::evaluateAndApplyLinkage(bool allowCameraDecision, bool allowLed
 bool MainWindow::startCameraProcess(bool autoTriggered)
 {
     QString cameraApp = "/lib/modules/4.1.15-g3dc0a4b/Camera_Project";
+    const CameraLaunchPlan launchPlan =
+        buildCameraLaunchPlan(cameraApp.toStdString(),
+                              qEnvironmentVariable("QT_QPA_PLATFORM").toStdString());
 
     qDebug() << (autoTriggered ? "自动启动监控画面：" : "手动启动监控画面：") << cameraApp;
 
@@ -418,21 +443,74 @@ bool MainWindow::startCameraProcess(bool autoTriggered)
         cameraProcess = nullptr;
     }
 
-    cameraProcess = new QProcess(this);
-    connect(cameraProcess, &QProcess::readyReadStandardError, [=]() {
-        qDebug() << "Camera stderr:" << cameraProcess->readAllStandardError();
-    });
-    connect(cameraProcess, SIGNAL(finished(int, QProcess::ExitStatus)),
-            this, SLOT(handleCameraFinished(int, QProcess::ExitStatus)));
-    cameraProcess->start(cameraApp);
+    if (pendingCameraSessionId_ == 0) {
+        reserveCameraSession(autoTriggered);
+    }
 
-    if (cameraProcess->waitForStarted(3000)) {
+    cameraProcess = new QProcess(this);
+    QProcess *process = cameraProcess;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("PERF_SESSION_ID", QString::number(pendingCameraSessionId_));
+    env.insert("PERF_AUTO_TRIGGERED", autoTriggered ? "1" : "0");
+    env.insert("QT_QPA_PLATFORM", QString::fromStdString(launchPlan.qtPlatform));
+    process->setProcessEnvironment(env);
+    process->setWorkingDirectory(QString::fromStdString(launchPlan.workingDirectory));
+    process->setProgram(QString::fromStdString(launchPlan.program));
+
+    QStringList processArgs;
+    for (std::size_t i = 0; i < launchPlan.arguments.size(); ++i) {
+        processArgs << QString::fromStdString(launchPlan.arguments[i]);
+    }
+    process->setArguments(processArgs);
+
+    connect(process, &QProcess::readyReadStandardOutput, this, [process]() {
+        if (!process) {
+            return;
+        }
+
+        const QByteArray data = process->readAllStandardOutput();
+        if (data.isEmpty()) {
+            return;
+        }
+
+        QTextStream out(stdout);
+        out << QString::fromLocal8Bit(data);
+        out.flush();
+    });
+    connect(process, &QProcess::readyReadStandardError, this, [process]() {
+        if (!process) {
+            return;
+        }
+
+        const QByteArray data = process->readAllStandardError();
+        if (data.isEmpty()) {
+            return;
+        }
+
+        QTextStream err(stderr);
+        err << QString::fromLocal8Bit(data);
+        err.flush();
+    });
+    connect(process, SIGNAL(finished(int, QProcess::ExitStatus)),
+            this, SLOT(handleCameraFinished(int, QProcess::ExitStatus)));
+    process->start();
+
+    if (process->waitForStarted(3000)) {
         qDebug() << "Camera_Project启动成功";
+        activeCameraSessionId_ = pendingCameraSessionId_;
+        logPerfEvent("camera_process_started",
+                     {{"session_id", QString::number(activeCameraSessionId_)},
+                      {"auto_triggered", autoTriggered ? "1" : "0"}});
+        pendingCameraSessionId_ = 0;
         this->hide();
         return true;
     }
 
     qDebug() << "Camera_Project启动失败：" << cameraProcess->errorString();
+    logPerfEvent("camera_process_start_failed",
+                 {{"session_id", QString::number(pendingCameraSessionId_)},
+                  {"auto_triggered", autoTriggered ? "1" : "0"}});
+    pendingCameraSessionId_ = 0;
     if (!autoTriggered) {
         QMessageBox::warning(this, "错误", "无法启动监控程序");
     }
@@ -482,11 +560,18 @@ bool MainWindow::setLedState(bool on)
 
     linkageState_.ledOn = on;
     qDebug() << "auto LED state changed to:" << (on ? 1 : 0);
+    logPerfEvent("led_auto_set",
+                 {{"led", on ? "1" : "0"},
+                  {"als", QString::number(sensorSnapshot_.als)},
+                  {"trigger_ts_ms", QString::number(currentDarkTriggerTsMs_)}});
     return true;
 }
 
 void MainWindow::on_pushButton_4_clicked()
 {
+    const int sessionId = reserveCameraSession(false);
+    logPerfEvent("camera_manual_start_requested",
+                 {{"session_id", QString::number(sessionId)}});
     if (startCameraProcess(false)) {
         recordManualCameraStart(linkageState_);
     }
@@ -499,6 +584,11 @@ void MainWindow::handleCameraFinished(int exitCode, QProcess::ExitStatus exitSta
 
     qDebug() << "Camera_Project进程结束，exitCode:" << exitCode << "exitStatus:" << exitStatus;
     qDebug() << "重新显示智能家居主窗口";
+    logPerfEvent("camera_process_finished",
+                 {{"session_id", QString::number(activeCameraSessionId_)},
+                  {"exit_code", QString::number(exitCode)},
+                  {"exit_status", QString::number(static_cast<int>(exitStatus))}});
+    activeCameraSessionId_ = 0;
 
     if (cameraProcess) {
         cameraProcess->deleteLater();
@@ -521,4 +611,16 @@ void MainWindow::handleCameraFinished(int exitCode, QProcess::ExitStatus exitSta
         restoreDashboardWindow();
         refreshDashboardSnapshot();
     });
+}
+
+void MainWindow::logPerfEvent(const QString &event, const QList<PerfKv> &fields)
+{
+    qInfo().noquote() << buildPerfEventLine("My_Project", event, fields);
+}
+
+int MainWindow::reserveCameraSession(bool autoTriggered)
+{
+    Q_UNUSED(autoTriggered);
+    pendingCameraSessionId_ = ++nextCameraSessionId_;
+    return pendingCameraSessionId_;
 }

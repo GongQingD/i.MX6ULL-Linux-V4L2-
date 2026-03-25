@@ -3,6 +3,42 @@
 这个目录目前用于承载 Mac 端发起的远端构建脚本。当前可用脚本是：
 
 - `remote_qt_build.sh`：把 Mac 上的 Qt 工程同步到 Ubuntu builder 交叉编译，并按需部署到开发板。
+- `collect_linkage_perf.py`：从开发板抓取一轮 `PERF_EVENT` 运行日志，并自动调用分析脚本。
+- `analyze_linkage_perf.py`：离线解析 `PERF_EVENT` 日志，输出 `events.jsonl`、`summary.json` 和 `summary.txt`。
+
+## 0. 联动性能统计脚本
+
+如果你当前要补“预览帧率 / 人体触发时延 / 暗光补光时延 / 连续运行时长 / 联动成功率”，优先走下面这条命令：
+
+```bash
+python3 scripts/collect_linkage_perf.py \
+  --board root@10.20.20.36 \
+  --board-dir /lib/modules/4.1.15-g3dc0a4b \
+  --run-seconds 180
+```
+
+执行后会在 `scripts/perf_runs/<run_id>/` 下生成：
+
+- `raw/board.log`
+- `events.jsonl`
+- `summary.json`
+- `summary.txt`
+
+其中 `summary.txt` 是可直接粘贴到文档或简历草稿里的成句结果。
+
+如果你已经有一份现成板端日志，也可以离线重跑：
+
+```bash
+python3 scripts/collect_linkage_perf.py \
+  --log-file /path/to/board.log \
+  --output-dir scripts/perf_runs/manual-replay
+```
+
+需要注意：
+
+- 这套链路只负责“采集并统计”，不会替你判断这轮测试场景是否合格
+- 没有真实板端运行数据时，`summary.txt` 只能视为工具输出格式验证，不能当成最终性能结论
+- `continuous_run_hours` 在实时采集模式下按本轮抓取窗口长度统计，不要求中途持续有业务事件输出
 
 ## 1. 三台机器的角色
 

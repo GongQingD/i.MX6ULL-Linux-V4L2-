@@ -4,10 +4,13 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QSocketNotifier>
+#include <QTextStream>
 #include <QtGlobal>
 #include <myslide.h>
 
+#include "perf_event.h"
 #include "linkage_logic.h"
 
 QT_BEGIN_NAMESPACE
@@ -42,6 +45,9 @@ private:
     void stopCameraProcess();
     bool syncLedStateFromDevice();
     bool setLedState(bool on);
+    void logPerfEvent(const QString &event,
+                      const QList<PerfKv> &fields = QList<PerfKv>());
+    int reserveCameraSession(bool autoTriggered);
 
     Ui::MainWindow *ui;
 
@@ -62,5 +68,9 @@ private:
     SensorSnapshot sensorSnapshot_{};
     bool hasMotionSample_ = false;
     bool hasAlsSample_ = false;
+    qint64 currentDarkTriggerTsMs_ = 0;
+    int nextCameraSessionId_ = 0;
+    int pendingCameraSessionId_ = 0;
+    int activeCameraSessionId_ = 0;
 };
 #endif // MAINWINDOW_H

@@ -8,6 +8,8 @@
 - 当前多传感器联动与多线程控制方案的首条记录见 [2026-03-22 更新 001：多传感器联动与多线程控制方案](项目更新日志.md)
 - 当前多传感器联动代码落地记录见 [2026-03-23 更新 002：多传感器联动与多线程实现落地](项目更新日志.md)
 - 当前 `SR501` 从轮询改回异步通知的修正记录见 [2026-03-24 更新 005：SR501 Qt 接线改为异步通知](项目更新日志.md)
+- 当前联动性能统计链路记录见 [2026-03-25 更新 015：联动性能采集链路落地](项目更新日志.md)
+- 当前相机子进程启动链路修正与首轮真实性能样本见 [2026-03-25 更新 016：Camera_Project 子进程启动路径修正并拿到首轮真实性能样本](项目更新日志.md)
 
 ## 项目概览
 
@@ -180,6 +182,57 @@ ssh root@10.20.20.36 "bash -l -c 'cd /lib/modules/4.1.15-g3dc0a4b && ./preload_d
 ```
 
 这条命令的目的不是把脚本内容改复杂，而是让远程执行环境尽量接近你在板端手动登录后再运行 `./preload_drivers.sh` 的效果。`bash -l -c` 会走 login shell，比直接 `ssh 'cd ... && ./preload_drivers.sh'` 更接近现场手工操作。
+
+## 联动性能统计
+
+当前仓库已经接入一条“板端轻量事件 + Mac 端汇总”的性能统计链路：
+
+- 板端 `My_Project` 和 `Camera_Project` 会输出 `PERF_EVENT ...` 行
+- Mac 端使用 `scripts/collect_linkage_perf.py` 抓取一轮运行日志
+- `scripts/analyze_linkage_perf.py` 会生成：
+  - `events.jsonl`
+  - `summary.json`
+  - `summary.txt`
+
+推荐命令：
+
+```bash
+python3 scripts/collect_linkage_perf.py \
+  --board root@10.20.20.36 \
+  --board-dir /lib/modules/4.1.15-g3dc0a4b \
+  --run-seconds 180
+```
+
+默认输出目录为：
+
+```text
+scripts/perf_runs/<run_id>/
+  raw/board.log
+  events.jsonl
+  summary.json
+  summary.txt
+```
+
+`summary.txt` 会直接生成可填入文档的句子，例如：
+
+```text
+实现 \textbf{33.0 FPS} 视频预览，人体触发到摄像头稳定输出画面耗时 \textbf{620 ms}，暗光联动补光响应时间 \textbf{180 ms}；系统连续运行 \textbf{1.500 h} 保持稳定，联动触发成功率 \textbf{100.0\%}。
+```
+
+当前脚本可自动统计的字段有：
+
+- `stable_preview_fps`
+- `motion_to_first_frame_ms`
+- `dark_to_led_on_ms`
+- `continuous_run_hours`
+- `linkage_success_rate_percent`
+
+其中 `continuous_run_hours` 在实时采集模式下优先使用本轮采集窗口时长，不再依赖日志里“最后一个事件”的时间戳。
+
+当前必须明确的边界是：
+
+- 如果还没有真正跑一轮板端采集，就不能把这些值手填成“已验证结果”
+- 目前本仓库只完成了统计链路代码接入与主机侧测试，真实数值仍需你在板端运行后生成
 
 
 ## 版本历史

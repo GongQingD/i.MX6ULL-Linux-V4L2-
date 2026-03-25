@@ -15,6 +15,7 @@
 #include <QGridLayout>
 #include <QResizeEvent>
 #include "v4l2_device.h"
+#include "perf_event.h"
 
 class ImageViewerDialog : public QDialog {
     Q_OBJECT
@@ -89,6 +90,11 @@ private:
         qint64 total_frames;
         int stat_frame_count;
     } latency_stats;
+
+    QString sessionId_;
+    bool firstFrameLogged_;
+
+    void logPerfEvent(const QString &event, const QList<PerfField> &fields = {});
 };
 
 #endif // MAINWINDOW_H

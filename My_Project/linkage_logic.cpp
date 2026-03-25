@@ -50,6 +50,11 @@ LinkageDecision evaluateLinkage(LinkageState &state,
                                 const SensorSnapshot &snapshot,
                                 long long nowMs) {
     LinkageDecision decision{};
+    const bool motionRise = snapshot.motionDetected && !state.lastMotionDetected;
+    const bool isDarkNow = snapshot.als <= kAlsDarkThreshold;
+    const bool darkRise = isDarkNow && !state.lastDarkCondition;
+
+    decision.motionTriggered = motionRise;
 
     if (snapshot.motionDetected) {
         state.autoCameraDeadlineMs = nowMs + kMotionHoldMs;
@@ -72,12 +77,16 @@ LinkageDecision evaluateLinkage(LinkageState &state,
             state.ledOn = true;
             decision.setLed = true;
             decision.ledOn = true;
+            decision.darkTriggered = darkRise;
         } else if (state.ledOn && snapshot.als >= kAlsBrightThreshold) {
             state.ledOn = false;
             decision.setLed = true;
             decision.ledOn = false;
         }
     }
+
+    state.lastMotionDetected = snapshot.motionDetected;
+    state.lastDarkCondition = isDarkNow;
 
     return decision;
 }

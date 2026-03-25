@@ -5,6 +5,8 @@ TEMPLATE = app
 
 DEFINES += QT_DEPRECATED_WARNINGS
 
+INCLUDEPATH += $$PWD/../common
+
 SOURCES += \
     main.cpp \
     mainwindow.cpp \

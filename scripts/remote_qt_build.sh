@@ -134,12 +134,20 @@ for project in "${PROJECTS[@]}"; do
     local_dir="$REPO_ROOT/$project"
     remote_dir="$BUILDER_BASE/$project"
     artifact="$remote_dir/$project"
+    common_dir="$REPO_ROOT/common"
+    remote_common_dir="$BUILDER_BASE/common"
 
     [[ -d "$local_dir" ]] || die "local project dir not found: $local_dir"
     [[ -f "$local_dir/$project.pro" ]] || die "missing project file: $local_dir/$project.pro"
 
     log "prepare builder dir for $project"
     ssh "$BUILDER" "mkdir -p '$remote_dir'"
+
+    if [[ -d "$common_dir" ]]; then
+        log "sync common headers to $BUILDER:$remote_common_dir"
+        ssh "$BUILDER" "mkdir -p '$remote_common_dir'"
+        rsync -av --delete "$common_dir/" "$BUILDER:$remote_common_dir/"
+    fi
 
     log "sync $project to $BUILDER:$remote_dir"
     rsync -av --delete "$local_dir/" "$BUILDER:$remote_dir/"

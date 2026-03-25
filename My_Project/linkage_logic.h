@@ -25,6 +25,8 @@ struct LinkageState {
     CameraOwner cameraOwner = CameraOwner::None;
     long long autoCameraDeadlineMs = 0;
     long long manualLedFreezeUntilMs = 0;
+    bool lastMotionDetected = false;
+    bool lastDarkCondition = false;
 };
 
 struct LinkageDecision {
@@ -32,6 +34,8 @@ struct LinkageDecision {
     bool ledOn = false;
     bool startCamera = false;
     bool stopCamera = false;
+    bool motionTriggered = false;
+    bool darkTriggered = false;
     CameraOwner cameraOwner = CameraOwner::None;
 };
 

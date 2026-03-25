@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <QtGlobal>
 
 ImageViewerDialog::ImageViewerDialog(const QStringList &paths, int currentIndex, QWidget *parent)
     : QDialog(parent), m_paths(paths), m_currentIndex(currentIndex)
@@ -134,7 +135,9 @@ MainWindow::MainWindow(QWidget *parent)
       lastFrameTime(0),
       lastDisplayTime(0),
       latency_stats({0, 0, 0, 0, 0}),
-      scaledSize(0, 0)
+      scaledSize(0, 0),
+      sessionId_(qEnvironmentVariable("PERF_SESSION_ID")),
+      firstFrameLogged_(false)
 {
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
 
@@ -198,6 +201,7 @@ MainWindow::MainWindow(QWidget *parent)
             QMessageBox::critical(this, "Error", "Cannot init device");
         } else {
             camera->startCapturing();
+            logPerfEvent("camera_project_started");
             int fd = camera->getFileDescriptor();
             frameNotifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
             connect(frameNotifier, &QSocketNotifier::activated, this, &MainWindow::updateFrame);
@@ -283,6 +287,12 @@ void MainWindow::updateFrame()
                         .arg(avg_io, 0, 'f', 1)
                         .arg(avg_process, 0, 'f', 1)
                         .arg(avg_display, 0, 'f', 1);
+                    logPerfEvent("camera_fps_window", {
+                        {"fps", QString::number(fps, 'f', 2)},
+                        {"io_ms", QString::number(avg_io, 'f', 2)},
+                        {"process_ms", QString::number(avg_process, 'f', 2)},
+                        {"display_ms", QString::number(avg_display, 'f', 2)}
+                    });
                 }
 
                 fpsLabel->setText(latencyText);
@@ -317,6 +327,14 @@ void MainWindow::updateFrame()
             }
         }
 
+        if (!firstFrameLogged_ && !currentRawImage.isNull()) {
+            firstFrameLogged_ = true;
+            logPerfEvent("camera_first_frame_displayed", {
+                {"width", QString::number(camera->getWidth())},
+                {"height", QString::number(camera->getHeight())}
+            });
+        }
+
         qint64 T4 = QDateTime::currentMSecsSinceEpoch();
         qint64 io_wait = (lastDisplayTime > 0) ? (T1 - lastDisplayTime) : 0;
         latency_stats.total_io += io_wait;
@@ -332,6 +350,8 @@ void MainWindow::updateFrame()
 
 void MainWindow::captureImage()
 {
+    logPerfEvent("camera_capture_clicked");
+
     if (!currentRawImage.isNull()) {
         currentImage = currentRawImage.copy();
     }
@@ -386,10 +406,22 @@ void MainWindow::onExitButtonClicked()
 {
     qDebug() << "退出监控画面，返回智能家居界面";
 
+    logPerfEvent("camera_exit_clicked");
+
     if (camera) {
         camera->stopCapturing();
         camera->closeDevice();
     }
 
     QApplication::quit();
+}
+
+void MainWindow::logPerfEvent(const QString &event, const QList<PerfField> &fields)
+{
+    QList<PerfField> finalFields = fields;
+    if (!sessionId_.isEmpty()) {
+        finalFields.prepend({QStringLiteral("session_id"), sessionId_});
+    }
+    QString line = buildPerfEventLine("Camera_Project", event, finalFields);
+    qInfo().noquote() << line;
 }

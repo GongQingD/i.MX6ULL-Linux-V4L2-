@@ -183,6 +183,51 @@ static void test_manual_helpers_update_state() {
     assert(state.autoCameraDeadlineMs == 0);
 }
 
+static void test_motion_rise_triggered_once_per_edge() {
+    LinkageState state{};
+    SensorSnapshot snapshot{};
+
+    snapshot.motionDetected = true;
+    LinkageDecision d1 = evaluateLinkage(state, snapshot, 1000);
+    assert(d1.motionTriggered);
+    assert(d1.startCamera);
+
+    LinkageDecision d2 = evaluateLinkage(state, snapshot, 1200);
+    assert(!d2.motionTriggered);
+    assert(!d2.startCamera);
+
+    snapshot.motionDetected = false;
+    LinkageDecision d3 = evaluateLinkage(state, snapshot, 2000);
+    assert(!d3.motionTriggered);
+
+    snapshot.motionDetected = true;
+    LinkageDecision d4 = evaluateLinkage(state, snapshot, 3000);
+    assert(d4.motionTriggered);
+}
+
+static void test_dark_triggered_once_per_dark_edge() {
+    LinkageState state{};
+    SensorSnapshot snapshot{};
+
+    snapshot.als = 60;
+    LinkageDecision d1 = evaluateLinkage(state, snapshot, 1000);
+    assert(d1.darkTriggered);
+    assert(d1.setLed);
+    assert(d1.ledOn);
+
+    LinkageDecision d2 = evaluateLinkage(state, snapshot, 1200);
+    assert(!d2.darkTriggered);
+
+    snapshot.als = 140;
+    LinkageDecision d3 = evaluateLinkage(state, snapshot, 2000);
+    assert(d3.setLed);
+    assert(!d3.ledOn);
+
+    snapshot.als = 70;
+    LinkageDecision d4 = evaluateLinkage(state, snapshot, 3000);
+    assert(d4.darkTriggered);
+}
+
 int main() {
     test_motion_starts_camera_and_stops_at_timeout_boundary();
     test_motion_retrigger_extends_auto_camera_deadline();
@@ -195,5 +240,7 @@ int main() {
     test_restore_main_window_when_camera_session_finishes();
     test_parse_camera_child_output_line();
     test_manual_helpers_update_state();
+    test_motion_rise_triggered_once_per_edge();
+    test_dark_triggered_once_per_dark_edge();
     return 0;
 }
