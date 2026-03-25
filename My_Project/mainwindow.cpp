@@ -13,6 +13,7 @@
 #include <QTimer>
 #include <QProcess>
 #include <QApplication>
+#include <QDateTime>
 #include <QPalette>
 #include <thread>
 #include <errno.h>
@@ -23,6 +24,10 @@
 #include <sys/ioctl.h>
 
 namespace {
+
+constexpr int kAlsDarkThreshold = 80;
+constexpr int kAlsBrightThreshold = 120;
+constexpr qint64 kMotionHoldMs = 5000;
 
 int g_sr501SignalWriteFd = -1;
 
@@ -81,6 +86,7 @@ MainWindow::MainWindow(QWidget *parent)
     sr501Notifier = nullptr;
     sr501SignalFds[0] = -1;
     sr501SignalFds[1] = -1;
+    syncLedStateFromDevice();
 
     if (sr501_fd >= 0 && !setupSr501Async()) {
         qDebug() << "SR501 async notification setup failed, label will not auto-refresh";
@@ -141,6 +147,8 @@ void MainWindow::on_pushButton_clicked()
         return;
     }
 
+    hasLedAutoState = true;
+    ledAutoState = (buf[0] == 1);
     printf("LED state changed to: %d\n", buf[0]);
 }
 
@@ -153,34 +161,36 @@ void MainWindow::ap3216c_timeout()
         ui->label_ir->setText("--");
         ui->label_light->setText("--");
         ui->label_dis->setText("--");
-        return;
-    }
-
-    lseek(ap3216c_fd, 0, SEEK_SET);
-    if (read(ap3216c_fd, buf, 6) != 6) {
-        ui->label_ir->setText("ERR");
-        ui->label_light->setText("ERR");
-        ui->label_dis->setText("ERR");
-        return;
-    }
-
-    int is_data_valid = ((buf[0] & 0x80) == 0) && ((buf[4] & 0x40) == 0);
-
-    if (is_data_valid) {
-        ir = (buf[1] << 2) | (buf[0] & 0x03);
-        als = (buf[3] << 8) | buf[2];
-        ps = ((buf[5] & 0x3F) << 4) | (buf[4] & 0x0F);
-        printf("IR: %u, ALS: %u, PS: %u\n", ir, als, ps);
     } else {
-        ir = 0;
-        als = 0;
-        ps = ((buf[5] & 0x3F) << 4) | (buf[4] & 0x0F);
-        printf("valid: %d, IR: %u, ALS: %u, PS: %u\n", is_data_valid, ir, als, ps);
+        lseek(ap3216c_fd, 0, SEEK_SET);
+        if (read(ap3216c_fd, buf, 6) != 6) {
+            ui->label_ir->setText("ERR");
+            ui->label_light->setText("ERR");
+            ui->label_dis->setText("ERR");
+        } else {
+            int is_data_valid = ((buf[0] & 0x80) == 0) && ((buf[4] & 0x40) == 0);
+
+            if (is_data_valid) {
+                ir = (buf[1] << 2) | (buf[0] & 0x03);
+                als = (buf[3] << 8) | buf[2];
+                ps = ((buf[5] & 0x3F) << 4) | (buf[4] & 0x0F);
+                printf("IR: %u, ALS: %u, PS: %u\n", ir, als, ps);
+            } else {
+                ir = 0;
+                als = 0;
+                ps = ((buf[5] & 0x3F) << 4) | (buf[4] & 0x0F);
+                printf("valid: %d, IR: %u, ALS: %u, PS: %u\n", is_data_valid, ir, als, ps);
+            }
+
+            ui->label_ir->setNum(ir);
+            ui->label_light->setNum(als);
+            ui->label_dis->setNum(ps);
+            lastAlsValue = als;
+            hasAlsValue = true;
+        }
     }
 
-    ui->label_ir->setNum(ir);
-    ui->label_light->setNum(als);
-    ui->label_dis->setNum(ps);
+    processAutomaticActions();
 
     dht11_count++;
     if (dht11_count >= 3) {
@@ -328,7 +338,7 @@ void MainWindow::updateSr501Label()
 
     int state = 0;
     if (Sr501Async::readDeviceState(sr501_fd, state)) {
-        ui->label_people->setNum(state);
+        handleSr501State(state);
     } else {
         ui->label_people->setText("ERR");
     }
@@ -346,16 +356,68 @@ void MainWindow::handleSr501Notification()
     sr501Notifier->setEnabled(true);
 }
 
-void MainWindow::on_pushButton_4_clicked()
+void MainWindow::handleSr501State(int state)
+{
+    hasSr501State = true;
+    lastSr501State = (state != 0);
+    ui->label_people->setNum(state);
+
+    if (!lastSr501State) {
+        return;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    cameraAutoDeadlineMs = nowMs + kMotionHoldMs;
+
+    if (cameraProcess && cameraProcess->state() == QProcess::Running) {
+        return;
+    }
+
+    startCameraProcess(true);
+}
+
+void MainWindow::processAutomaticActions()
+{
+    if (hasAlsValue && led_fd >= 0) {
+        if (!hasLedAutoState) {
+            syncLedStateFromDevice();
+        }
+
+        if (hasLedAutoState) {
+            if (!ledAutoState && lastAlsValue <= kAlsDarkThreshold) {
+                setLedState(true);
+            } else if (ledAutoState && lastAlsValue >= kAlsBrightThreshold) {
+                setLedState(false);
+            }
+        }
+    }
+
+    if (cameraAutoRunning &&
+        (!cameraProcess || cameraProcess->state() != QProcess::Running)) {
+        cameraAutoRunning = false;
+        cameraAutoDeadlineMs = 0;
+    }
+
+    if (cameraAutoRunning &&
+        hasSr501State &&
+        !lastSr501State &&
+        QDateTime::currentMSecsSinceEpoch() >= cameraAutoDeadlineMs) {
+        stopCameraProcess();
+    }
+}
+
+bool MainWindow::startCameraProcess(bool autoTriggered)
 {
     QString cameraApp = "/lib/modules/4.1.15-g3dc0a4b/Camera_Project";
 
-    qDebug() << "启动监控画面：" << cameraApp;
+    qDebug() << (autoTriggered ? "自动启动监控画面：" : "手动启动监控画面：") << cameraApp;
 
     if (cameraProcess && cameraProcess->state() == QProcess::Running) {
-        cameraProcess->terminate();
-        cameraProcess->waitForFinished(3000);
-        delete cameraProcess;
+        return true;
+    }
+
+    if (cameraProcess) {
+        cameraProcess->deleteLater();
         cameraProcess = nullptr;
     }
 
@@ -363,20 +425,83 @@ void MainWindow::on_pushButton_4_clicked()
     connect(cameraProcess, &QProcess::readyReadStandardError, [=]() {
         qDebug() << "Camera stderr:" << cameraProcess->readAllStandardError();
     });
+    connect(cameraProcess, SIGNAL(finished(int, QProcess::ExitStatus)),
+            this, SLOT(handleCameraFinished(int, QProcess::ExitStatus)));
     cameraProcess->start(cameraApp);
 
     if (cameraProcess->waitForStarted(3000)) {
         qDebug() << "Camera_Project启动成功";
+        cameraAutoRunning = autoTriggered;
+        if (!autoTriggered) {
+            cameraAutoDeadlineMs = 0;
+        }
         this->hide();
-
-        connect(cameraProcess, SIGNAL(finished(int, QProcess::ExitStatus)),
-                this, SLOT(handleCameraFinished(int, QProcess::ExitStatus)));
-    } else {
-        qDebug() << "Camera_Project启动失败：" << cameraProcess->errorString();
-        QMessageBox::warning(this, "错误", "无法启动监控程序");
-        delete cameraProcess;
-        cameraProcess = nullptr;
+        return true;
     }
+
+    qDebug() << "Camera_Project启动失败：" << cameraProcess->errorString();
+    if (!autoTriggered) {
+        QMessageBox::warning(this, "错误", "无法启动监控程序");
+    }
+    cameraAutoRunning = false;
+    cameraAutoDeadlineMs = 0;
+    delete cameraProcess;
+    cameraProcess = nullptr;
+    return false;
+}
+
+void MainWindow::stopCameraProcess()
+{
+    cameraAutoRunning = false;
+    cameraAutoDeadlineMs = 0;
+
+    if (!cameraProcess || cameraProcess->state() != QProcess::Running) {
+        return;
+    }
+
+    cameraProcess->terminate();
+    cameraProcess->waitForFinished(3000);
+}
+
+bool MainWindow::syncLedStateFromDevice()
+{
+    if (led_fd < 0) {
+        return false;
+    }
+
+    ssize_t ret = read(led_fd, buf, 1);
+    if (ret < 0) {
+        qDebug() << "read LED state failed:" << strerror(errno);
+        return false;
+    }
+
+    hasLedAutoState = true;
+    ledAutoState = (buf[0] == 1);
+    return true;
+}
+
+bool MainWindow::setLedState(bool on)
+{
+    if (led_fd < 0) {
+        return false;
+    }
+
+    buf[0] = on ? 1 : 0;
+    ssize_t ret = write(led_fd, buf, 1);
+    if (ret < 0) {
+        qDebug() << "write LED state failed:" << strerror(errno);
+        return false;
+    }
+
+    hasLedAutoState = true;
+    ledAutoState = on;
+    qDebug() << "auto LED state changed to:" << (on ? 1 : 0);
+    return true;
+}
+
+void MainWindow::on_pushButton_4_clicked()
+{
+    startCameraProcess(false);
 }
 
 void MainWindow::handleCameraFinished(int exitCode, QProcess::ExitStatus exitStatus)
@@ -391,6 +516,9 @@ void MainWindow::handleCameraFinished(int exitCode, QProcess::ExitStatus exitSta
         cameraProcess->deleteLater();
         cameraProcess = nullptr;
     }
+
+    cameraAutoRunning = false;
+    cameraAutoDeadlineMs = 0;
 
     restoreDashboardWindow();
     refreshDashboardSnapshot();

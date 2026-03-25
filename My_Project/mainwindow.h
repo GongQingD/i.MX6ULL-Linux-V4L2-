@@ -5,6 +5,7 @@
 #include <QMessageBox>
 #include <QProcess>
 #include <QSocketNotifier>
+#include <QtGlobal>
 #include <myslide.h>
 
 QT_BEGIN_NAMESPACE
@@ -33,6 +34,12 @@ private:
     bool setupSr501Async();
     void teardownSr501Async();
     void updateSr501Label();
+    void handleSr501State(int state);
+    void processAutomaticActions();
+    bool startCameraProcess(bool autoTriggered);
+    void stopCameraProcess();
+    bool syncLedStateFromDevice();
+    bool setLedState(bool on);
 
     Ui::MainWindow *ui;
 
@@ -49,5 +56,13 @@ private:
 
     unsigned char buf[10];
     int sr501SignalFds[2];
+    bool lastSr501State = false;
+    bool hasSr501State = false;
+    bool cameraAutoRunning = false;
+    qint64 cameraAutoDeadlineMs = 0;
+    bool ledAutoState = false;
+    bool hasLedAutoState = false;
+    int lastAlsValue = 0;
+    bool hasAlsValue = false;
 };
 #endif // MAINWINDOW_H
