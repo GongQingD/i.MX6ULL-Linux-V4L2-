@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "linkage_logic.h"
 #include "sr501_async.h"
 #include "ui_mainwindow.h"
 
@@ -24,11 +25,6 @@
 #include <sys/ioctl.h>
 
 namespace {
-
-constexpr int kAlsDarkThreshold = 80;
-constexpr int kAlsBrightThreshold = 120;
-constexpr qint64 kMotionHoldMs = 5000;
-
 int g_sr501SignalWriteFd = -1;
 
 void sr501SigioHandler(int)
@@ -70,6 +66,11 @@ MainWindow::MainWindow(QWidget *parent)
     if (dht11_fd < 0)
         printf("open dht11 failed.");
 
+    cameraProcess = nullptr;
+    sr501Notifier = nullptr;
+    sr501SignalFds[0] = -1;
+    sr501SignalFds[1] = -1;
+
     sr501_fd = open(sr501_drv.toStdString().c_str(), O_RDWR);
     if (sr501_fd < 0) {
         printf("open sr501 failed.");
@@ -82,10 +83,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ap3216c_timer, &QTimer::timeout, this, &MainWindow::ap3216c_timeout);
     ap3216c_timer->start(1000);
 
-    cameraProcess = nullptr;
-    sr501Notifier = nullptr;
-    sr501SignalFds[0] = -1;
-    sr501SignalFds[1] = -1;
     syncLedStateFromDevice();
 
     if (sr501_fd >= 0 && !setupSr501Async()) {
@@ -147,8 +144,7 @@ void MainWindow::on_pushButton_clicked()
         return;
     }
 
-    hasLedAutoState = true;
-    ledAutoState = (buf[0] == 1);
+    linkageState_.ledOn = (buf[0] == 1);
     printf("LED state changed to: %d\n", buf[0]);
 }
 
@@ -185,12 +181,12 @@ void MainWindow::ap3216c_timeout()
             ui->label_ir->setNum(ir);
             ui->label_light->setNum(als);
             ui->label_dis->setNum(ps);
-            lastAlsValue = als;
-            hasAlsValue = true;
+            sensorSnapshot_.als = als;
+            hasAlsSample_ = true;
         }
     }
 
-    processAutomaticActions();
+    evaluateAndApplyLinkage(hasMotionSample_, hasAlsSample_);
 
     dht11_count++;
     if (dht11_count >= 3) {
@@ -358,50 +354,51 @@ void MainWindow::handleSr501Notification()
 
 void MainWindow::handleSr501State(int state)
 {
-    hasSr501State = true;
-    lastSr501State = (state != 0);
+    sensorSnapshot_.motionDetected = (state != 0);
+    hasMotionSample_ = true;
     ui->label_people->setNum(state);
 
-    if (!lastSr501State) {
-        return;
-    }
-
-    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    cameraAutoDeadlineMs = nowMs + kMotionHoldMs;
-
-    if (cameraProcess && cameraProcess->state() == QProcess::Running) {
-        return;
-    }
-
-    startCameraProcess(true);
+    evaluateAndApplyLinkage(true, hasAlsSample_);
 }
 
-void MainWindow::processAutomaticActions()
+void MainWindow::evaluateAndApplyLinkage(bool allowCameraDecision, bool allowLedDecision)
 {
-    if (hasAlsValue && led_fd >= 0) {
-        if (!hasLedAutoState) {
-            syncLedStateFromDevice();
-        }
-
-        if (hasLedAutoState) {
-            if (!ledAutoState && lastAlsValue <= kAlsDarkThreshold) {
-                setLedState(true);
-            } else if (ledAutoState && lastAlsValue >= kAlsBrightThreshold) {
-                setLedState(false);
-            }
-        }
+    if (!allowCameraDecision && !allowLedDecision) {
+        return;
     }
 
-    if (cameraAutoRunning &&
-        (!cameraProcess || cameraProcess->state() != QProcess::Running)) {
-        cameraAutoRunning = false;
-        cameraAutoDeadlineMs = 0;
+    LinkageState previousState = linkageState_;
+    const LinkageDecision rawDecision = evaluateLinkage(linkageState_,
+                                                        sensorSnapshot_,
+                                                        QDateTime::currentMSecsSinceEpoch());
+    LinkageDecision decision = rawDecision;
+
+    if (!allowCameraDecision) {
+        linkageState_.cameraRunning = previousState.cameraRunning;
+        linkageState_.cameraOwner = previousState.cameraOwner;
+        linkageState_.autoCameraDeadlineMs = previousState.autoCameraDeadlineMs;
+        decision.startCamera = false;
+        decision.stopCamera = false;
+        decision.cameraOwner = previousState.cameraOwner;
     }
 
-    if (cameraAutoRunning &&
-        hasSr501State &&
-        !lastSr501State &&
-        QDateTime::currentMSecsSinceEpoch() >= cameraAutoDeadlineMs) {
+    if (!allowLedDecision) {
+        linkageState_.ledOn = previousState.ledOn;
+        decision.setLed = false;
+        decision.ledOn = previousState.ledOn;
+    }
+
+    if (decision.setLed && !setLedState(decision.ledOn)) {
+        linkageState_.ledOn = previousState.ledOn;
+    }
+
+    if (decision.startCamera && !startCameraProcess(true)) {
+        linkageState_.cameraRunning = previousState.cameraRunning;
+        linkageState_.cameraOwner = previousState.cameraOwner;
+        linkageState_.autoCameraDeadlineMs = previousState.autoCameraDeadlineMs;
+    }
+
+    if (decision.stopCamera) {
         stopCameraProcess();
     }
 }
@@ -431,10 +428,6 @@ bool MainWindow::startCameraProcess(bool autoTriggered)
 
     if (cameraProcess->waitForStarted(3000)) {
         qDebug() << "Camera_Project启动成功";
-        cameraAutoRunning = autoTriggered;
-        if (!autoTriggered) {
-            cameraAutoDeadlineMs = 0;
-        }
         this->hide();
         return true;
     }
@@ -443,8 +436,6 @@ bool MainWindow::startCameraProcess(bool autoTriggered)
     if (!autoTriggered) {
         QMessageBox::warning(this, "错误", "无法启动监控程序");
     }
-    cameraAutoRunning = false;
-    cameraAutoDeadlineMs = 0;
     delete cameraProcess;
     cameraProcess = nullptr;
     return false;
@@ -452,9 +443,6 @@ bool MainWindow::startCameraProcess(bool autoTriggered)
 
 void MainWindow::stopCameraProcess()
 {
-    cameraAutoRunning = false;
-    cameraAutoDeadlineMs = 0;
-
     if (!cameraProcess || cameraProcess->state() != QProcess::Running) {
         return;
     }
@@ -475,8 +463,7 @@ bool MainWindow::syncLedStateFromDevice()
         return false;
     }
 
-    hasLedAutoState = true;
-    ledAutoState = (buf[0] == 1);
+    linkageState_.ledOn = (buf[0] == 1);
     return true;
 }
 
@@ -493,15 +480,16 @@ bool MainWindow::setLedState(bool on)
         return false;
     }
 
-    hasLedAutoState = true;
-    ledAutoState = on;
+    linkageState_.ledOn = on;
     qDebug() << "auto LED state changed to:" << (on ? 1 : 0);
     return true;
 }
 
 void MainWindow::on_pushButton_4_clicked()
 {
-    startCameraProcess(false);
+    if (startCameraProcess(false)) {
+        recordManualCameraStart(linkageState_);
+    }
 }
 
 void MainWindow::handleCameraFinished(int exitCode, QProcess::ExitStatus exitStatus)
@@ -517,8 +505,9 @@ void MainWindow::handleCameraFinished(int exitCode, QProcess::ExitStatus exitSta
         cameraProcess = nullptr;
     }
 
-    cameraAutoRunning = false;
-    cameraAutoDeadlineMs = 0;
+    linkageState_.cameraRunning = false;
+    linkageState_.cameraOwner = CameraOwner::None;
+    linkageState_.autoCameraDeadlineMs = 0;
 
     restoreDashboardWindow();
     refreshDashboardSnapshot();

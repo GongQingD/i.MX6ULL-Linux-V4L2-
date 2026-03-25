@@ -8,10 +8,12 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     main.cpp \
+    linkage_logic.cpp \
     mainwindow.cpp \
     sr501_async.cpp
 
 HEADERS += \
+    linkage_logic.h \
     mainwindow.h \
     sr501_async.h
 

@@ -8,6 +8,8 @@
 #include <QtGlobal>
 #include <myslide.h>
 
+#include "linkage_logic.h"
+
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
@@ -35,7 +37,7 @@ private:
     void teardownSr501Async();
     void updateSr501Label();
     void handleSr501State(int state);
-    void processAutomaticActions();
+    void evaluateAndApplyLinkage(bool allowCameraDecision, bool allowLedDecision);
     bool startCameraProcess(bool autoTriggered);
     void stopCameraProcess();
     bool syncLedStateFromDevice();
@@ -56,13 +58,9 @@ private:
 
     unsigned char buf[10];
     int sr501SignalFds[2];
-    bool lastSr501State = false;
-    bool hasSr501State = false;
-    bool cameraAutoRunning = false;
-    qint64 cameraAutoDeadlineMs = 0;
-    bool ledAutoState = false;
-    bool hasLedAutoState = false;
-    int lastAlsValue = 0;
-    bool hasAlsValue = false;
+    LinkageState linkageState_{};
+    SensorSnapshot sensorSnapshot_{};
+    bool hasMotionSample_ = false;
+    bool hasAlsSample_ = false;
 };
 #endif // MAINWINDOW_H
